@@ -8,6 +8,6 @@
 
 验证：48 项回归通过；两批 UI 在中文/英文及 1100×700、1280×800 四种组合均通过 Chromium 验证；Astra 审查通过，Windows 源码读取已显式 UTF-8。真实 AI/TG 服务与原生桌面安装尚待验证。
 
-构建：Windows x64、Mac Intel 和 Mac Apple 芯片使用各自原生 GitHub Actions 运行器。每个平台生成安装包后必须通过实际打包程序的版本、API 与静态资源检查，并记录安装包 SHA256。仅上传构建产物，不发布 Release。
+构建：Windows x64 和 Mac Apple 芯片使用各自原生 GitHub Actions 运行器。每个平台生成安装包后必须通过实际打包程序的版本、API 与静态资源检查，并记录安装包 SHA256。仅上传构建产物，不发布 Release。
 
 安装见 docs/INSTALL.md。Mac 测试包使用 ad-hoc 签名且未公证，Windows 测试包尚无代码签名。源码 ZIP 不是原生安装包。

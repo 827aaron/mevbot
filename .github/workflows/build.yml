@@ -1,6 +1,6 @@
 # 詹姆斯智能体 / James Agent —— 测试安装包（第 5a 步）
 # Windows：PyInstaller + Inno Setup → JamesAgent-Setup-<版本>.exe（作为构建产物上传，不发布）
-# Mac：macos-15-intel / macos-15 上 PyInstaller + dmgbuild → Intel / Apple 芯片 .dmg
+# Mac Apple 芯片：macos-15 上 PyInstaller + dmgbuild → arm64 .dmg
 name: build-test-installers
 
 on:
@@ -84,33 +84,6 @@ jobs:
           name: JamesAgent-Windows-installer
           path: |
             dist/JamesAgent-Setup-*.exe
-            dist/packaged-smoke.json
-          if-no-files-found: error
-          retention-days: 14
-
-  mac-intel:
-    runs-on: macos-15-intel        # GitHub 目前的 Intel（x64）macOS 标准运行器（macos-13 已下线）
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            packaging/requirements-build.txt
-      - name: Build .dmg (Intel)
-        run: bash packaging/build_mac.sh "$(which python)"
-      - name: Packaged API smoke and version checks
-        env:
-          SALESTEAM_NO_SCHEDULER: "1"
-        run: .venv-build/bin/python packaging/smoke_package.py "dist/詹姆斯智能体.app/Contents/MacOS/JamesAgent"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: JamesAgent-Mac-Intel-dmg
-          path: |
-            dist/*.dmg
             dist/packaged-smoke.json
           if-no-files-found: error
           retention-days: 14

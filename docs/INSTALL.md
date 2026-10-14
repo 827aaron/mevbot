@@ -7,7 +7,7 @@
 
 ## Mac（macOS 14 及以上）
 
-安装包：`JamesAgent-0.3.0-mac-arm64.dmg`（Apple 芯片：M1 / M2 / M3 / M4…）；Intel 芯片的 Mac 用 `JamesAgent-0.3.0-mac-x86_64.dmg`。
+安装包：`JamesAgent-0.3.0-mac-arm64.dmg`（Apple 芯片：M1 / M2 / M3 / M4…）。本次不提供 Intel Mac 安装包。
 
 ### 中文步骤
 

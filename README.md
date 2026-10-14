@@ -6,4 +6,4 @@
 - [安装说明](docs/INSTALL.md)
 - [第三方许可](docs/THIRD_PARTY_LICENSES.md)
 
-构建产物由 Actions 提供：Windows 安装程序、Mac Intel DMG、Mac Apple 芯片 DMG。
+构建产物由 Actions 提供：Windows 安装程序、Mac Apple 芯片 DMG。
