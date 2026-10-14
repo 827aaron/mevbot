@@ -660,7 +660,8 @@ def delete_all(data: dict = Depends(body)):
             for t in tables:
                 db.execute(f"DELETE FROM {t}")
             for key in ("manager_goal", "scout_settings", "scout_collection_state", "channel_overrides",
-                        "source_pool_settings", "source_pool_entries", "source_pool_report", "source_pool_checkpoints"):
+                        "source_pool_settings", "source_pool_entries", "source_pool_report", "source_pool_checkpoints",
+                        "source_pool_bootstrap", "manager_preparation", "manager_connection_checks", "manager_remediations"):
                 db.execute("DELETE FROM settings WHERE key=?", (key,))
             if scope == "everything":
                 llm.init_defaults()
@@ -670,6 +671,9 @@ def delete_all(data: dict = Depends(body)):
         # finally blocks cannot be relied on to clear scheduling sentinels.
         from . import scheduler
         from .agents import scout
+        from .agents import preparation, remediation
+        preparation._busy = False
+        remediation._active.clear()
         from .tg import upkeep
         scheduler._last.clear()
         scheduler._tg_info_busy[0] = False

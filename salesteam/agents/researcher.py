@@ -57,6 +57,10 @@ class Researcher:
         extra_words = source_pool.keywords_for(run.icp_id)
         self.words["product"] = list(dict.fromkeys(self.words["product"] + extra_words))
         self.crawler = crawler_mod.Crawler(mock=self.mock, should_stop=run.should_stop)
+        if edition.current()["id"] == "my_igaming":
+            self.crawler.cfg["render_js"] = True
+            with run.stats_lock:
+                run.stats["crawler_mode"] = "auto_http_browser"
         self.seen_urls: set[str] = set()
         self.discovered_urls: set[str] = set()
         self.fetch_failures = []
@@ -92,7 +96,7 @@ class Researcher:
         offset = {"google": 0, "web": qps, "youtube": 2 * qps}.get(source, 0)
         # Manager retries explore later combinations from the same approved ICP.
         # The program cap is enforced again here; no setting or filter is changed.
-        retry = max(0, min(2, int(self.run.params.get("manager_query_offset") or 0)))
+        retry = max(0, min(3, int(self.run.params.get("manager_query_offset") or 0)))
         offset += retry * 3 * qps
         qs = self.icp_mod.search_queries(self.icp, n + offset)[offset:offset + n] or \
             self.icp_mod.search_queries(self.icp, n)
@@ -289,19 +293,23 @@ class Researcher:
                              "ollama_unreachable", "key_no_permission"):
                     raise
                 self.note(src, e.key)
-                self._source_status(src, "failed", e.key)
+                self._source_status(src, "failed", e.key, e.params)
                 self.emit("ev.source_failed", level="error", source=f"@source.{src}", error=e.key, **e.params)
-        self.run.agent_state.setdefault(AGENT, {})["state"] = "done"
-        self.run.emit(AGENT, "ev.researcher_done", level="success", state="done", pool=self.run.stats["pool"])
+        states = self.run.stats.get("source_status", {})
+        failed = bool(srcs) and all(states.get(src, {}).get("status") == "failed" for src in srcs)
+        state = "error" if failed else "done"
+        self.run.agent_state.setdefault(AGENT, {})["state"] = state
+        self.run.emit(AGENT, "ev.researcher_sources_failed" if failed else "ev.researcher_done",
+                      level="error" if failed else "success", state=state, pool=self.run.stats["pool"])
 
     # ---- 每个来源的结果说明（任务没找够时用大白话告诉客户为什么，PRD §4）
     def note(self, src: str, why: str):
         self.run.source_notes.setdefault(src, why)      # 先记下的更具体（例如“没有网址，自动找名录也被拦住”）
 
-    def _source_status(self, source, status, error=""):
+    def _source_status(self, source, status, error="", params=None):
         with self.run.stats_lock:
             states = self.run.stats.setdefault("source_status", {})
-            states[source] = {"status": status, "error": error}
+            states[source] = {"status": status, "error": error, "params": params or {}}
         self.run.bump()
 
     def _search_diagnostic(self, query, status, provider="", params=None):
@@ -313,7 +321,7 @@ class Researcher:
             del history[:-30]
         self.run.bump()
 
-    FATAL_SEARCH = ("search_key_invalid", "search_quota")      # Key 不对 / 额度用完：后面的搜索词也一样，不再试
+    FATAL_SEARCH = ("search_key_invalid", "search_quota", "search_blocked")
 
     def run_search(self, q: dict, n: int):
         """搜一个词。失败（免费搜索被拦、网络问题…）返回 None 并记下原因，接着搜下一个词（不因为一次失败放弃整个来源）。"""
@@ -324,8 +332,15 @@ class Researcher:
         except UserError as e:
             self.search_errors.append(e)
             self._search_diagnostic(q["q"], "failed", e.params.get("provider", ""), e.params)
-            self.emit("ev.search_query_failed", level="warn", **{**e.params, "query": q["q"], "error": f"@errors.{e.key}"})
-            if e.key in self.FATAL_SEARCH:
+            # Every free endpoint marked dead will remain unavailable for this
+            # task. Rotating queries and sleeping cannot revive those endpoints.
+            st = getattr(self.crawler, "_free_search", {}) or {}
+            exhausted = (bool(st.get("last", {}).get("failed")) and not st.get("last", {}).get("empty") and
+                         all(name in st.get("dead", {}) for name in search_mod.FREE_ENDPOINTS))
+            terminal = e.key in self.FATAL_SEARCH or exhausted
+            self.emit("ev.search_unavailable" if terminal else "ev.search_query_failed", level="warn",
+                      **{**e.params, "query": q["q"], "error": f"@errors.{e.key}"})
+            if terminal:
                 raise
             if not self.mock:
                 self.pause_jitter(3, 8)              # 被拦后隔一会儿再搜下一个词
@@ -413,6 +428,18 @@ class Researcher:
     def source_web(self):
         urls = list(dict.fromkeys(list(self.run.params.get("urls") or []) +
                                  (source_pool.urls() if source_pool.config()["icp_id"] == self.run.icp_id else [])))
+        bootstrap = False
+        if not urls and not self.mock and edition.current()["id"] == "my_igaming":
+            bootstrap = True
+            self.run.emit("manager", "ev.source_seed_planning", state="working")
+            try:
+                urls = source_pool.bootstrap_urls(self.run.icp_id, self.run.id)
+            except UserError as exc:
+                self.run.emit("manager", "ev.source_seed_failed", level="warn", state="error", error=exc.key)
+                raise
+            self.run.emit("manager", "ev.source_seed_proposed", state="done", count=len(urls))
+            if not urls:
+                raise UserError("source_bootstrap_empty")
         if not urls:
             self.emit("ev.no_urls_search_directories")
             n = max(2, int(self.search_cfg["queries_per_source"]) // 2)
@@ -428,7 +455,11 @@ class Researcher:
                     self.claude_search(q)
                     continue
                 tried += 1
-                results = self.run_search(q, 5)
+                try:
+                    results = self.run_search(q, 5)
+                except UserError:
+                    self.note("web", "no_urls_blocked")
+                    raise
                 if results is None:
                     continue
                 ok += 1
@@ -453,6 +484,9 @@ class Researcher:
             if not page:
                 continue
             read_count += 1
+            if bootstrap:
+                discovered = source_pool.accept_bootstrap_page(self.run.icp_id, page)
+                self.emit("ev.source_seed_read", url=page["url"], count=int(bool(discovered)))
             self.extract_page("web", page)
             if social.platform_for(page["url"]):
                 continue  # Never follow registration or account/action links.

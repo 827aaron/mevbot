@@ -46,6 +46,11 @@
 
   /* ---------- 渲染 ---------- */
   function msgText(m) { return m.key ? t(m.key, m.params || {}) : esc(m.text); }
+  function messageTools(m, key) {
+    const text = m.key ? t(m.key, m.params || {}).replace(/<[^>]+>/g, '') : String(m.text || '');
+    return '<div class="msg-tools"><button class="btn btn-ghost btn-sm" data-action="chatCopy" data-copy-text="' + esc(text) + '">' + icon('copy') + t('c.copy') + '</button>' +
+      (m.id > 0 && !m.pending ? '<button class="btn btn-ghost btn-sm" data-action="chatDelete" data-k="' + esc(key) + '" data-id="' + m.id + '"' + (box(key).clearing ? ' disabled' : '') + '>' + icon('trash') + t('chat.deleteMessage') + '</button>' : '') + '</div>';
+  }
   function actionBtn(a) {
     const label = t(a.k, a.p || {});
     if (a.act === 'chatAct' && a.done) return '<span class="tag tag-outline">' + icon('check') + esc(a.k === 'nf.undo' ? t('chat.undone') : label) + '</span>';
@@ -61,12 +66,12 @@
   }
   function msgHtml(m, key) {
     if (m.thinking) return '<div class="msg" data-agent="' + key + '">' + U.avatar(key, 'sm') + '<div><div class="bubble"><span class="thinking" data-agent="' + key + '"><i></i><i></i><i></i></span> <span class="xs muted">' + t('chat.thinking') + '</span></div></div></div>';
-    if (m.from === 'me') return '<div class="msg me"><div><div class="who">' + t('agent.client') + ' · ' + U.hhmm(m.time) + '</div><div class="bubble">' + U.para(m.text) + '</div></div></div>';
+    if (m.from === 'me') return '<div class="msg me"><div><div class="who">' + t('agent.client') + ' · ' + U.hhmm(m.time) + '</div><div class="bubble">' + U.para(m.text) + '</div>' + messageTools(m, key) + '</div></div>';
     const card = m.card === 'memo' && m.memo ? memoCard(m) : '';
     const acts = m.actions || [];
     return '<div class="msg" data-agent="' + key + '">' + U.avatar(key, 'sm') + '<div><div class="who">' + esc(t('agent.' + key)) + ' · ' + U.hhmm(m.time) + '</div>' +
       '<div class="bubble">' + (m.key ? msgText(m) : U.para(m.text)) + (acts.length && !card ? ' ' + acts.map(actionBtn).join('') : '') + card +
-      (acts.length && card ? '<div class="row wrap" style="margin-top:6px;gap:2px">' + acts.map(actionBtn).join('') + '</div>' : '') + '</div></div></div>';
+      (acts.length && card ? '<div class="row wrap" style="margin-top:6px;gap:2px">' + acts.map(actionBtn).join('') + '</div>' : '') + '</div>' + messageTools(m, key) + '</div></div>';
   }
   const SUGGEST = ['mc2.s1', 'mc2.s2', 'mc2.s3', 'mc2.s4'];
   function chatInner() {
@@ -226,6 +231,49 @@
   A.mgrSend = (el) => { const w = el.closest('[data-mgr-chat]'); send(w.querySelector('.mgr-input').value); };
   A.mgrClear = (el) => clearDialog(el.dataset.k, false);
   A.mgrForget = (el) => clearDialog(el.dataset.k, true);
+  A.chatCopy = async (el) => {
+    const text = el.dataset.copyText || '';
+    try {
+      try {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable');
+        await navigator.clipboard.writeText(text);
+      } catch (err) {
+        // WKWebView may not expose the Clipboard API. Native text selection
+        // and the browser's copy command remain available.
+        const active = document.activeElement, selection = window.getSelection();
+        const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i).cloneRange()) : [];
+        const ta = document.createElement('textarea'); ta.value = text; ta.readOnly = true;
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0'; document.body.appendChild(ta);
+        try { ta.select(); if (!document.execCommand('copy')) throw new Error('copy failed'); }
+        finally {
+          ta.remove();
+          if (active && active.isConnected && active.focus) active.focus();
+          if (selection) { selection.removeAllRanges(); ranges.forEach((range) => selection.addRange(range)); }
+        }
+      }
+      U.toast(t('c.copied'));
+    } catch (err) { U.toast(t('chat.copyFailed'), 'error'); }
+  };
+  A.chatDelete = async (el) => {
+    const key = el.dataset.k, id = +el.dataset.id, b = box(key);
+    if (b.clearing || !id) return;
+    const accepted = await U.confirmDialog({ title: t('chat.deleteMessage'), body: t('chat.deleteMessageBody'), ok: t('c.delete'), danger: true,
+      onOk: async () => {
+        b.clearing = true; b.epoch++; renderChats();
+        let deleted = false;
+        try {
+          await U.api('DELETE', '/api/chat/' + key + '/messages/' + id);
+          b.msgs = b.msgs.filter((m) => m.id !== id && !m.pending);
+          deleted = true;
+        } finally {
+          b.clearing = false; b.sending = false;
+          if (!deleted) await load(key, true).catch(() => { b.loaded = false; });
+          renderChats(); U.refreshBadges();
+        }
+      },
+    });
+    if (accepted) U.toast(t('common.deleted'));
+  };
   A.mgrSuggest = (el) => send(t(el.dataset.k));
   A.mgrTarget = async (el) => { S.chatTarget = el.dataset.k; S.mgrDraft = ''; renderChats(); await ensure(); renderChats(); setTimeout(focusInput, 20); };
   A.chatAct = async (el) => {

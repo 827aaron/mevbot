@@ -37,11 +37,12 @@ _EVENT_PARAMS = {"q", "query", "keyword", "n", "count", "reason", "detail", "err
                  "errors", "pages", "countries", "lang", "action", "steps", "cost", "result", "stage",
                  "grade", "processed", "pool", "queries", "messages", "chats", "keyword_hits", "prescreened"}
 _TASK_PARAMS = {"sources", "target", "countries", "languages", "keywords", "query", "keyword", "icp_id",
-                "manager_query_offset", "schedule_id", "created_by", "goal_date"}
+                "manager_query_offset", "schedule_id", "created_by", "goal_date", "retry_count"}
 _STATS = {"pool", "processed", "qualified", "backup", "discarded", "duplicate", "filtered", "errors", "pages",
           "queries", "messages", "chats", "keyword_hits", "prescreened", "source_notes", "search_results",
           "source_states", "source_status", "search_diagnostics", "discovered",
           "source_new_items", "source_unchanged_items", "source_changed_items"}
+_STATS.add("crawler_mode")
 
 
 def _known_values():
@@ -93,7 +94,7 @@ class Redactor:
         return _HOME.sub("[HOME]", text)
 
     def data(self, value, depth=0):
-        if depth > 6:
+        if depth > 9:
             return "[TRUNCATED]"
         if isinstance(value, dict):
             return {self.text(k): self.data(v, depth + 1) for k, v in list(value.items())[:80]
@@ -127,13 +128,28 @@ def _snapshot():
             "source_keys_present": {name: bool(db.query_one("SELECT name FROM secrets WHERE name=?", (name,)))
                                     for name in ("serper_api_key", "brave_api_key", "youtube_api_key")},
         }
+        # Counts describe crawler entry availability without exporting source
+        # URLs, private-group links or login state.
+        from . import source_pool
+        pool = source_pool.config()
+        configs["source_pool"] = {**_only(pool, {"enabled", "icp_id", "time_of_day"}),
+                                  "feature_word_count": len(pool.get("keywords") or []),
+                                  "sources": db.query("SELECT kind,status,COUNT(*) AS count FROM channels "
+                                                      "WHERE CAST(id AS TEXT) IN "
+                                                      "(SELECT key FROM json_each(?)) GROUP BY kind,status",
+                                                      (db.dumps(settings.get("source_pool_entries", {}) or {}),))}
+        configs["manager_preparation"] = _only(settings.get("manager_preparation", {}) or {},
+                                                {"icp_id", "phase", "checks", "error", "params", "updated_at"})
         for agent in configs["agents"]:
             agent["key_present"] = bool(agent["key_present"])
         recent = db.query("SELECT id,kind,icp_id,status,target,stats,result,error,created_by,created_at,started_at,finished_at,"
                           "substr(params,1,16384) AS params FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?", (MAX_TASKS,))
         remaining = MAX_EVENTS
         for task in recent:
-            task["params"] = _only(db.loads(task["params"], {}), _TASK_PARAMS)
+            params = db.loads(task["params"], {})
+            task["input_summary"] = {"explicit_url_count": len(params.get("urls") or []),
+                                     "source_pool_matches_icp": pool.get("icp_id") == task["icp_id"]}
+            task["params"] = _only(params, _TASK_PARAMS)
             task["stats"] = _only(db.loads(task["stats"], {}), _STATS)
             events = db.query("SELECT seq,ts,agent,level,key AS event_key,substr(params,1,16384) AS params FROM task_events "
                               "WHERE task_id=? ORDER BY seq DESC LIMIT ?", (task["id"], min(remaining, MAX_EVENTS_PER_TASK)))

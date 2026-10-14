@@ -180,11 +180,15 @@ def validate_research(params: dict, check_agents: bool = True) -> dict:
     if not 1 <= target <= 500:
         raise UserError("task_target_range")
     urls = [u.strip() for u in (params.get("urls") or []) if u and u.strip()][:50]
+    retry_count = params.get("retry_count", 0)
+    if type(retry_count) is not int or not 0 <= retry_count <= 3:
+        raise UserError("invalid_value", field="retry_count")
     offset = params.get("manager_query_offset", 0)
-    if type(offset) is not int or not 0 <= offset <= 2:
+    if type(offset) is not int or not 0 <= offset <= 3:
         raise UserError("invalid_value", field="manager_query_offset")
     return {"icp_id": icp_id, "sources": sources, "target": target, "urls": urls,
-            "follow_links": bool(params.get("follow_links", True)), "manager_query_offset": offset}
+            "follow_links": bool(params.get("follow_links", True)), "manager_query_offset": offset,
+            "retry_count": retry_count}
 
 
 def create_task(params: dict, created_by="user", parent_id=None, goal_date=None, kind="research",
@@ -447,6 +451,9 @@ def _after_finish(run: TaskRun, result: str):
             background.spawn(push.auto_push, "task_done", name="task-push")
         except Exception:  # noqa: BLE001
             traceback.print_exc()
+    if run.kind == "research":
+        from .agents import remediation
+        remediation.tick()
 
 
 def _execute_pipeline(run: TaskRun):
@@ -589,5 +596,5 @@ def _execute_pipeline(run: TaskRun):
             db.execute("UPDATE tasks SET status=?, result=?, error=?, stats=?, finished_at=? WHERE id=?",
                        (status, result, error, db.dumps(run.stats), db.now(), run.id))
             run.emit("system", "ev.task_closed", status=status)
-            _after_finish(run, result)
             run.done = True
+            _after_finish(run, result)

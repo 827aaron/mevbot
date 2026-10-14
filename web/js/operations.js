@@ -15,7 +15,7 @@
   function goalFields(goal, icps, prefix) {
     return '<div class="form-grid"><div class="field"><label class="label" for="' + prefix + '-icp">' + t('tasks.template') + '</label><select class="select" id="' + prefix + '-icp" required>' + icpOptions(icps, goal.icp_id) + '</select></div>' +
       '<div class="field"><label class="label" for="' + prefix + '-target">' + t('tasks.target') + '</label><input class="input" type="number" min="1" max="500" step="1" required id="' + prefix + '-target" value="' + esc(goal.target || 10) + '"></div>' +
-      '<div class="field"><label class="label" for="' + prefix + '-time">' + t('ops.time') + '</label><input class="input" type="time" required id="' + prefix + '-time" value="' + esc(goal.time_of_day || '09:00') + '"></div><div class="field"><label class="label" for="' + prefix + '-retries">' + t('ops.retries') + '</label><select class="select" id="' + prefix + '-retries">' + [0, 1, 2].map((n) => '<option value="' + n + '"' + (n === +goal.max_retries ? ' selected' : '') + '>' + t(n ? 'ops.retriesN' : 'ops.noRetries', { n }) + '</option>').join('') + '</select></div></div>' +
+      '<div class="field"><label class="label" for="' + prefix + '-time">' + t('ops.time') + '</label><input class="input" type="time" required id="' + prefix + '-time" value="' + esc(goal.time_of_day || '09:00') + '"></div><div class="field"><label class="label" for="' + prefix + '-retries">' + t('ops.retries') + '</label><select class="select" id="' + prefix + '-retries">' + [0, 1, 2, 3].map((n) => '<option value="' + n + '"' + (n === +goal.max_retries ? ' selected' : '') + '>' + t(n ? 'ops.retriesN' : 'ops.noRetries', { n }) + '</option>').join('') + '</select></div></div>' +
       '<fieldset class="ops-sources"><legend class="label">' + t('tasks.sources') + '</legend><div class="row wrap">' + (S.meta.sources || []).filter((k) => ['google', 'web', 'youtube', 'tg'].includes(k)).map((k) => '<label class="checkbox"><input type="checkbox" data-ops-source="' + k + '"' + ((goal.sources || []).includes(k) ? ' checked' : '') + '> ' + t('source.' + k) + '</label>').join('') + '</div></fieldset>';
   }
   function proposalHtml(p) {
@@ -36,7 +36,27 @@
     const [report, plans] = await Promise.all([api('GET', '/api/manager/report?day=' + encodeURIComponent(day)), api('GET', '/api/manager/plan?day=' + encodeURIComponent(day))]);
     if (box.isConnected && input.value === day) box.innerHTML = reportHtml(report, plans);
   }
+  function preparationHtml(prep) {
+    if (!prep || !prep.phase) return '<p class="small muted">' + t('prep.intro') + '</p>';
+    return '<p class="small"><b>' + t('prep.phase.' + prep.phase) + '</b></p>' +
+      (prep.checks || []).map((c) => '<div class="row small" style="margin:5px 0">' + icon(c.status === 'optional' ? 'info' : 'checkCircle') +
+        '<span>' + esc(t('prep.check.' + c.name)) + '</span><span class="tag">' + esc(t('prep.' + c.status)) + '</span></div>').join('') +
+      (prep.error ? '<div class="alert alert-warning">' + esc(U.errText(new U.ApiError(prep.error, prep.params || {}))) + '</div>' : '') +
+      (prep.task_ids || []).map((id) => '<button class="btn btn-secondary btn-sm" data-action="go" data-route="run" data-q="task=' + esc(id) + '">' + t('prep.openTask') + '</button>').join('');
+  }
   function managerHtml(state, icps) {
+    const pid = (state.preparation || {}).icp_id || state.goal.icp_id || (icps[0] || {}).id || '';
+    const prep = '<section class="card" style="margin-bottom:16px"><div class="card-header"><h3>' + icon('checkCircle') + t('prep.title') + '</h3><button class="btn btn-primary btn-sm" data-action="opsPrepare" data-id="' + esc(pid) + '"' + (!pid ? ' disabled' : '') + '>' + t('prep.start') + '</button></div><div class="card-body" id="ops-preparation">' + preparationHtml(state.preparation) + '</div></section>';
+    if (!(S.meta.edition && S.meta.edition.id === 'my_igaming')) return managerBody(state, icps);
+    return prep + '<section class="card" style="margin-bottom:16px"><div class="card-header"><h3>' + t('retry.title') + '</h3></div><div class="card-body" id="ops-remediations">' + remediationHtml(state.remediations) + '</div></section>' + managerBody(state, icps);
+  }
+  function remediationHtml(values) {
+    if (!(values || []).length) return '<p class="small muted">' + t('retry.empty') + '</p>';
+    return values.slice(-10).map((job) => '<div class="small" style="margin:8px 0"><b>' + esc(t('retry.phase.' + job.phase)) + '</b><span class="xs muted"> · ' + esc(t('retry.round', { n: job.key.split(':').slice(-1)[0] })) + '</span>' +
+      (job.error ? '<p>' + esc(U.errText(new U.ApiError(job.error, job.params || {}))) + '</p>' : '') +
+      (job.task_id ? '<button class="btn btn-secondary btn-sm" data-action="go" data-route="run" data-q="task=' + esc(job.task_id) + '">' + t('prep.openTask') + '</button>' : '') + '</div>').join('');
+  }
+  function managerBody(state, icps) {
     return '<section class="card ops-manager" id="ops-manager"><div class="card-header"><h3>' + U.avatar('manager', 'sm') + t('ops.title') + '</h3><div class="actions"><button class="btn btn-secondary btn-sm" data-action="opsCommand">' + icon('message') + t('ops.command') + '</button></div></div><div class="card-body"><p class="small text-2" style="margin-bottom:12px">' + t('ops.sub') + '</p><div id="ops-manager-state">' + notice(state.blocked, state.goal.enabled, 'ops.off', 'ops.ready') + '</div><form id="ops-goal-form"><label class="checkbox" style="margin:14px 0"><input type="checkbox" id="ops-enabled"' + (state.goal.enabled ? ' checked' : '') + '> ' + t('ops.enabled') + '</label>' + goalFields(state.goal, icps, 'ops') + '<p class="hint">' + t('ops.nextDay') + '</p><div class="row wrap" style="margin-top:14px"><button type="submit" class="btn btn-primary" id="ops-goal-save">' + t('c.save') + '</button></div></form><div id="ops-proposal-wrap" style="margin-top:14px">' + proposalHtml(S.opsProposal) + '</div></div></section><section class="card" style="margin:16px 0" id="ops-report"><div class="card-header"><h3>' + icon('calendar') + t('ops.report') + '</h3><div class="actions"><label class="xs" for="ops-report-day">' + t('ops.date') + '</label><input class="input input-sm" type="date" required id="ops-report-day" value="' + dayNow() + '"></div></div><div class="card-body" id="ops-report-body">' + U.skeleton(2) + '</div></section>';
   }
   const runRender = P.run.render, runMount = P.run.mount;
@@ -65,11 +85,15 @@
     root.querySelector('#ops-report-day').onchange = () => loadReport(root).catch(toastErr);
     await loadReport(root).catch(toastErr);
     U.every(5000, async () => {
-      try { const state = await api('GET', '/api/manager/state'); const box = root.querySelector('#ops-manager-state'); if (box && box.isConnected) box.innerHTML = notice(state.blocked, state.goal.enabled, 'ops.off', 'ops.ready'); await loadReport(root); } catch (e) { /* Keep the last report visible during a transient failure. */ }
+      try { const state = await api('GET', '/api/manager/state'); const box = root.querySelector('#ops-manager-state'); if (box && box.isConnected) box.innerHTML = notice(state.blocked, state.goal.enabled, 'ops.off', 'ops.ready'); const prep = root.querySelector('#ops-preparation'); if (prep && prep.isConnected) prep.innerHTML = preparationHtml(state.preparation); const retry = root.querySelector('#ops-remediations'); if (retry && retry.isConnected) retry.innerHTML = remediationHtml(state.remediations); await loadReport(root); } catch (e) { /* Keep the last report visible during a transient failure. */ }
     });
     if (params.command) A.opsCommand();
   };
   A.opsRetry = () => U.refresh();
+  A.opsPrepare = async (el) => {
+    try { await busy(el, () => api('POST', '/api/manager/prepare', { icp_id: +el.dataset.id })); U.refresh(); }
+    catch (err) { toastErr(err); }
+  };
   A.opsCommand = async () => {
     try { const [icps, state] = await Promise.all([api('GET', '/api/icps'), api('GET', '/api/manager/state')]); S.opsIcps = icps; S.opsProposal = (state.commands || []).find((p) => p.status === 'pending') || null; } catch (e) { toastErr(e); return; }
     const w = U.openModal({ title: t('ops.command'), body: '<p class="small text-2" style="margin-bottom:12px">' + t('ops.commandHint') + '</p><textarea class="textarea" id="ops-command-input" maxlength="2000" placeholder="' + esc(t('ops.commandPlaceholder')) + '"></textarea><div id="ops-command-result" style="margin-top:14px">' + proposalHtml(S.opsProposal) + '</div>', footer: '<button class="btn btn-secondary" data-action="closeModal">' + t('c.cancel') + '</button><button class="btn btn-primary" id="ops-command-send">' + t('ops.propose') + '</button>' });

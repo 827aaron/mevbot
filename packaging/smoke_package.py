@@ -112,7 +112,7 @@ def main():
                 checks.append(asset)
             prompt_state = request("/api/prompts")
             bundled_prompt = next(p for p in prompt_state["items"] if p["name"] == "chat.system")
-            if prompt_state["version"] != "2026.10-p4" or "First working principle" not in bundled_prompt["default"]:
+            if prompt_state["version"] != "2026.10-p5" or "First working principle" not in bundled_prompt["default"]:
                 raise RuntimeError("wrong bundled chat prompt revision")
             for agent in ("manager", "analyst"):
                 request(f"/api/agents/{agent}/config", {"provider": "mock", "model": "mock"}, method="PUT")

@@ -64,7 +64,7 @@ def validate_goal(data):
     g = {**goal(), **data}
     boolean(g["enabled"], "enabled")
     integer(g["target"], "target", 1, 500)
-    integer(g["max_retries"], "max_retries", 0, 2)
+    integer(g["max_retries"], "max_retries", 0, 3)
     parse_time(g["time_of_day"])
     src = g["sources"]
     if not isinstance(src, list) or not src or any(s not in tasks.SOURCES for s in src):
@@ -95,6 +95,13 @@ def blocked(g=None):
         return "agent_disabled"
     if not llm.configured("manager"):
         return "agent_not_configured"
+    from . import preparation
+    prep = preparation.state()
+    if prep.get("icp_id") == g["icp_id"]:
+        if prep.get("phase") in ("pending", "checking", "sources"):
+            return "manager_preparing"
+        if prep.get("phase") == "blocked":
+            return prep.get("error") or "manager_preparation_failed"
     if llm.budget_state()["paused"]:
         return "budget_exceeded"
     try:
@@ -171,7 +178,9 @@ def _report(p, ts):
 
 
 def state():
-    return {"goal": goal(), "plans": plans(), "blocked": blocked(),
+    from . import preparation, remediation
+    return {"goal": goal(), "plans": plans(), "blocked": blocked(), "preparation": preparation.state(),
+            "remediations": [{"key": key, **value} for key, value in remediation.jobs().items()],
             "commands": [{**r, "proposal": db.loads(r["proposal"], {})} for r in db.query(
                 "SELECT * FROM manager_commands WHERE status='pending' ORDER BY id DESC LIMIT 10")]}
 
@@ -214,13 +223,31 @@ def tick(ts=None):
         if status == "pending":
             attempt = p["attempts"] + 1
             parent = f"manager:{p['id']}:{attempt}"
+            from .. import edition
+            retry_urls = []
+            if attempt > 1 and edition.current()["id"] == "my_igaming":
+                from . import remediation
+                expansion = remediation.ensure(parent, p["goal"]["icp_id"])
+                if expansion["phase"] != "ready":
+                    db.execute("UPDATE manager_plans SET status='blocked',last_error=?,updated_at=? WHERE id=?",
+                               (expansion.get("error") or "manager_expanding", ts, p["id"]))
+                    _report(_public(db.query_one("SELECT * FROM manager_plans WHERE id=?", (p["id"],))), ts)
+                    return []
+                retry_urls = expansion["urls"]
             try:
                 with tasks.registry_lock():
                     existing = db.query_one("SELECT id FROM tasks WHERE parent_id=? AND created_by='manager'", (parent,))
                     if not existing:
-                        t = tasks.create_task({**p["goal"], "target": p["remaining"], "manager_query_offset": attempt - 1}, created_by="manager",
+                        from . import preparation
+                        prep = preparation.state()
+                        verified = prep.get("verified_urls", []) if prep.get("icp_id") == p["goal"]["icp_id"] else []
+                        t = tasks.create_task({**p["goal"], "target": p["remaining"], "manager_query_offset": attempt - 1,
+                                               "urls": list(dict.fromkeys(verified + retry_urls)),
+                                               "sources": list(dict.fromkeys(p["goal"]["sources"] + (["web"] if verified or retry_urls else [])))}, created_by="manager",
                                               parent_id=parent, goal_date=today)
                         started.append(t["id"])
+                        if retry_urls:
+                            remediation._save(parent, phase="dispatched", task_id=t["id"])
                 db.execute("UPDATE manager_plans SET status='running',attempts=?,last_error='',updated_at=? WHERE id=?",
                            (attempt, ts, p["id"]))
             except UserError as exc:

@@ -158,6 +158,10 @@ def _tick():
     jobs.append(("schedules", task_schedules))
 
     from .agents import manager, scout
+    from .agents import preparation
+    jobs.append(("manager_preparation", preparation.tick))
+    from .agents import remediation
+    jobs.append(("manager_remediation", remediation.tick))
     jobs.append(("manager", manager.tick))
     jobs.append(("scout", scout.tick))
     from . import source_pool

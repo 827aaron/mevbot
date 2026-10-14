@@ -154,6 +154,72 @@ def entry_for(url):
     return None
 
 
+@background.tracked("source_pool:bootstrap")
+def bootstrap_urls(icp_id, task_id=None, exclude=None, nonce=""):
+    """Manager proposes bounded public starting points, not verified leads.
+
+    Only actual crawler observations may subsequently enter the source pool.
+    Cache proposals to avoid spending model tokens on every retry of an empty pool.
+    """
+    from . import prompts
+    from .agents import icp, schemas
+    profile = icp.get(icp_id)["data"]
+    if not settings.agent_enabled("manager"):
+        raise UserError("agent_disabled", agent="@agent.manager")
+    if not llm.configured("manager"):
+        raise UserError("agent_not_configured", agent="@agent.manager")
+    excluded = {str(u).rstrip("/") for u in (exclude or [])}
+    signature = hashlib.sha256(db.dumps({"icp": profile, "words": keywords_for(icp_id),
+                                        "exclude": sorted(excluded), "round": nonce}).encode()).hexdigest()
+    stamp = db.now()
+    with _lock:
+        cached = settings.get("source_pool_bootstrap", {}) or {}
+        if cached.get("signature") == signature and stamp - cached.get("at", 0) < 6 * 3600:
+            return list(cached.get("urls") or [])
+    schema = schemas.obj({"urls": {"type": "array", "items": schemas.S, "maxItems": 5}})
+    data, _ = llm.call_json("manager", "source_seed_plan", prompts.get("manager.source_seed_plan"),
+                            "Customer profile:\n" + db.dumps(profile) + "\nAdditional source features:\n" +
+                            db.dumps(keywords_for(icp_id)) + "\nAlready explored URLs; propose different entries:\n" +
+                            db.dumps(sorted(excluded)[:100]), schema, effort="low", task_id=task_id)
+    urls_out = []
+    for candidate in (data.get("urls") or [])[:5]:
+        try:
+            url = normalize_url(candidate)
+        except UserError:
+            continue
+        # An automatic seed is a read-only public entry, never an account
+        # action, registration URL or an invented private-group invite.
+        if (url.rstrip("/") in excluded or urlsplit(url).hostname in ("t.me", "telegram.me") or _registration_link(url)
+                or _retired_url(url)):
+            continue
+        if url not in urls_out:
+            urls_out.append(url)
+    with _lock:
+        settings.put("source_pool_bootstrap", {"signature": signature, "at": stamp, "urls": urls_out})
+    return urls_out
+
+
+@background.tracked("source_pool:bootstrap_observation")
+def accept_bootstrap_page(icp_id, page):
+    """Bind an unconfigured pool only after a real relevant public read."""
+    from .agents import icp
+    profile = icp.get(icp_id)["data"]
+    if not edition.signal_mode(profile):
+        return None
+    url = str(page.get("url") or "")
+    text = str(page.get("markdown") or "")
+    if page.get("error") or page.get("access", "public") != "public" or not _industry_evidence(url, text):
+        return None
+    with _lock:
+        cfg = config()
+        if cfg["icp_id"] is None:
+            cfg.update(icp_id=icp_id, discovered_keywords=[])
+            settings.put("source_pool_settings", cfg)
+        if cfg["icp_id"] != icp_id:
+            return None
+    return discover_page(icp_id, page)
+
+
 def _retired_url(url):
     if (settings.get("channel_overrides", {}) or {}).get(url.lower()) == "retired":
         return True
@@ -351,6 +417,10 @@ def tick(ts=None):
     ts = time.time() if ts is None else ts
     cfg = config()
     if not cfg["enabled"] or settings.ai_paused():
+        return None
+    from .agents import preparation
+    prep = preparation.state()
+    if prep.get("icp_id") == cfg["icp_id"] and prep.get("phase") in ("pending", "checking", "sources", "blocked"):
         return None
     today = manager.day(ts)
     if time.strftime("%H:%M", time.localtime(ts)) < cfg["time_of_day"]:

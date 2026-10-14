@@ -1179,7 +1179,7 @@
           const r = await api('POST', '/api/quickstart/' + ob.id + '/confirm', { tier: rel.relays.length ? tier : null });
           toast(t('qs.confirmed', { v: r.version }));
           S.meta = await api('GET', '/api/meta');
-          S.leaveGuard = null; obGo(5);
+          S.leaveGuard = null; if (r.preparation) U.go('run'); else obGo(5);
         });
       } catch (err) { toastErr(err); }
     };

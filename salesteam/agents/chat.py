@@ -271,6 +271,18 @@ def clear(agent: str):
 
 
 @_locked
+def delete_message(agent: str, msg_id: int):
+    if agent not in AGENT_KEYS:
+        raise UserError("unknown_agent", 404, agent=agent)
+    row = db.query_one("SELECT id FROM agent_chats WHERE id=? AND agent=?", (msg_id, agent))
+    if not row:
+        raise UserError("chat_message_not_found", 404)
+    db.execute("DELETE FROM agent_chats WHERE id=? AND agent=?", (msg_id, agent))
+    # Any in-flight reply may have used the deleted message as context.
+    _generations[agent] += 1
+
+
+@_locked
 def reset_memory(agent: str):
     """Forget conversation and standing memos only; retain business records.
 

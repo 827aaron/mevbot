@@ -97,6 +97,26 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertIn(value, task_text)
         self.assertNotIn("DO_NOT_EXPORT_RAW_CUSTOMER", self.text(files))
 
+    def test_nested_search_failure_reasons_and_crawl_entry_counts_survive_export(self):
+        from salesteam import source_pool
+        ident = self.task()
+        settings.set_secret("qa_secret", "NESTED_QA_SECRET_8714")
+        db.execute("UPDATE tasks SET params=?,stats=? WHERE id=?", (db.dumps({"sources": ["web"],
+                   "urls": ["https://public.example/directory"]}), db.dumps({"search_diagnostics": [{
+                   "query": "public business directories", "fallback": {"attempted": ["ddg_lite", "bing"],
+                   "failed": {"ddg_lite": "ev.crawl_challenge", "bing": "ev.robots_blocked"},
+                   "credential": "NESTED_QA_SECRET_8714"}}]}), ident))
+        source_pool.add({"url": "https://forum.example/private-looking-path", "kind": "forum"})
+        _, files = self.archive()
+        task = json.loads(files["tasks.json"])[0]
+        self.assertEqual(task["stats"]["search_diagnostics"][0]["fallback"]["failed"],
+                         {"ddg_lite": "ev.crawl_challenge", "bing": "ev.robots_blocked"})
+        self.assertEqual(task["input_summary"]["explicit_url_count"], 1)
+        config = json.loads(files["config.json"])
+        self.assertEqual(config["source_pool"]["sources"], [{"kind": "forum", "status": "monitored", "count": 1}])
+        self.assertNotIn("NESTED_QA_SECRET_8714", self.text(files))
+        self.assertNotIn("private-looking-path", self.text(files))
+
     def test_credentials_customer_records_and_files_are_not_exported(self):
         secret_values = {
             "agent": "QA-AGENT-SECRET-8993999b39",

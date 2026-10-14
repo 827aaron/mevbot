@@ -26,6 +26,16 @@ def goal(data: dict = Depends(body)):
     return manager.set_goal(data)
 
 
+@router.post("/manager/prepare")
+def prepare(data: dict = Depends(body)):
+    from .agents import preparation
+    try:
+        pid = int(data.get("icp_id"))
+    except (ValueError, TypeError):
+        raise UserError("task_icp_missing")
+    return preparation.request(pid)
+
+
 @router.post("/manager/command")
 def command(data: dict = Depends(body)):
     return manager.command(data.get("message"))

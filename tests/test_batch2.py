@@ -92,7 +92,7 @@ class ManagerTests(IsolatedTests):
         self.assertEqual(self.manager.tick(self.today), [])
         saved = self.manager.set_goal(self.goal_config())
         for changes in ({'target': 0}, {'target': 501}, {'target': True},
-                        {'sources': ['unsupported']}, {'time_of_day': '25:90'}, {'max_retries': 3}):
+                        {'sources': ['unsupported']}, {'time_of_day': '25:90'}, {'max_retries': 4}):
             with self.subTest(changes=changes):
                 invalid = dict(saved, **changes)
                 with self.assertRaises(UserError):

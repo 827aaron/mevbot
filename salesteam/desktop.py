@@ -521,7 +521,7 @@ def _window(port: int, sup, cleanup=None):
     except Exception:  # noqa: BLE001
         pass
     win = webview.create_window(APP_NAME.get(lang, APP_NAME["zh"]), url, width=1440, height=900, min_size=(1100, 700),
-                                js_api=Bridge())
+                                js_api=Bridge(), text_select=True)
     if sup is not None:
         log_path = os.path.join(os.environ["SALESTEAM_DATA"], "app.log")
         sup.on_give_up = lambda: win.load_html(_GAVE_UP.get(lang, _GAVE_UP["zh"]).format(log=log_path))

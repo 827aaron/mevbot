@@ -91,6 +91,9 @@ class ChatClearTests(unittest.TestCase):
             worker.start()
             try:
                 self.assertTrue(entered.wait(3))
+                if endpoint == "single-message":
+                    mid = db.query_one("SELECT id FROM agent_chats WHERE agent='manager' AND role='user'")["id"]
+                    endpoint = f"/api/chat/manager/messages/{mid}"
                 self.assertEqual(self.client.delete(endpoint).status_code, 200)
             finally:
                 release.set()
@@ -107,6 +110,25 @@ class ChatClearTests(unittest.TestCase):
 
     def test_late_response_cannot_restore_globally_cleared_memory(self):
         self.assert_late_reply_discarded("/api/memory/all")
+
+    def test_single_message_delete_preserves_other_messages_and_saved_memos(self):
+        self.seed_context()
+        old = chat.history("manager")
+        mid = old[0]["id"]
+        self.assertEqual(self.client.delete(f"/api/chat/analyst/messages/{mid}").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/chat/manager/messages/{mid}").status_code, 200)
+        self.assertEqual([r["id"] for r in chat.history("manager")], [old[1]["id"]])
+        self.assertEqual(len(chat.history("analyst")), 1)
+        self.assertEqual(len(db.query("SELECT * FROM memos")), 3)
+        self.assertEqual(self.client.delete(f"/api/chat/manager/messages/{mid}").status_code, 404)
+        with mock.patch("salesteam.llm.configured", return_value=True), \
+                mock.patch("salesteam.llm.call_json", return_value=({"reply": "fresh", "memos": []}, {})) as model:
+            chat.send("manager", "new question")
+        self.assertNotIn("old customer question", model.call_args.args[3])
+        self.assertIn("old manager reply", model.call_args.args[3])
+
+    def test_deleting_in_flight_user_message_discards_its_late_reply_and_memos(self):
+        self.assert_late_reply_discarded("single-message")
 
     def test_invalid_agent_does_not_delete_records(self):
         self.seed_context()

@@ -294,6 +294,9 @@ svg.icon.xl { width: 28px; height: 28px; }
 .input-group > .icon:first-child { position: absolute; left: 10px; color: var(--color-text-3); pointer-events: none; }
 .input-group > .icon:first-child + .input { padding-left: 32px; }
 .input-group .input-suffix { position: absolute; right: 4px; }
+.msg .bubble { -webkit-user-select: text; user-select: text; }
+.msg-tools { display: flex; gap: 6px; margin-top: 4px; user-select: none; }
+.msg.me .msg-tools { justify-content: flex-end; }
 .checkbox, .radio { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--fs-md); user-select: none; }
 .checkbox input, .radio input, .table input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--color-primary); margin: 0; cursor: pointer; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4) var(--space-5); }

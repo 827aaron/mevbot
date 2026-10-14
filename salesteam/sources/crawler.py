@@ -334,7 +334,7 @@ class Crawler:
             try:
                 from scrapling.fetchers import Fetcher
                 kw = {"cookies": self.cookies} if self.cookies else {}
-                resp = Fetcher.get(url, timeout=int(self.cfg.get("timeout", 20)), stealthy_headers=False,
+                resp = Fetcher.get(url, timeout=int(self.cfg.get("timeout", 20)), stealthy_headers=True,
                                    retries=1, **kw)
             except UserError:
                 raise
@@ -381,7 +381,15 @@ class Crawler:
         if sk not in self._js_sites and self.cfg.get("render_js", False) and \
                 looks_js_rendered(md, resp.body[:200000].decode("utf-8", "ignore") if isinstance(resp.body, bytes) else ""):
             # 需要加载后才显示内容的网站：用真实浏览器（不隐身）读一次
-            r3, _ = self._browser_fetch(url, stealth=False)
+            r3, deferred = self._browser_fetch(url, stealth=False)
+            if r3 is None:
+                self._deferred[sk] = deferred
+                raise Skip("ev.crawl_deferred", url=url, reason=deferred, domain=sk)
+            if r3.status >= 400:
+                raise Skip("ev.crawl_failed", url=url, reason=f"HTTP {r3.status}")
+            render_why, render_kind = self._check(url, r3, sk)
+            if render_why:
+                raise Skip("ev.crawl_challenge", url=url, reason=render_why, kind=render_kind, domain=sk)
             if r3 is not None and r3.status < 400 and not self._check(url, r3, sk)[0]:
                 md3 = self._markdown(r3)
                 if len(md3) > len(md):
@@ -517,7 +525,8 @@ class Crawler:
                 from scrapling.fetchers import StealthyFetcher
                 return StealthyFetcher.fetch(url, **self._stealth_kwargs()), ""
             from scrapling.fetchers import DynamicFetcher
-            return DynamicFetcher.fetch(url, headless=True, network_idle=True, disable_resources=True, block_ads=True,
+            return DynamicFetcher.fetch(url, headless=True, network_idle=False, load_dom=True, wait=1500,
+                                        wait_selector="body", disable_resources=True, block_ads=True,
                                         retries=1, timeout=max(30, int(self.cfg.get("timeout", 20))) * 1000), ""
         except Exception:  # noqa: BLE001
             import traceback

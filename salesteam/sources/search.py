@@ -192,9 +192,10 @@ def free(query, country="", lang="", n=8, crawler: Crawler | None = None):
     # Do not retry human verification, robots denial or limits via another browser.
     reasons = set(last["failed"].values())
     blocked = {"challenge", "ev.crawl_challenge", "ev.robots_blocked", "ev.domain_paused", "ev.domain_cooldown"}
+    detail = "; ".join(f"{name}: {reason}" for name, reason in last["failed"].items())
     if reasons and reasons <= blocked:
-        raise UserError("search_blocked", provider="DuckDuckGo / Bing")
-    raise UserError("search_failed", provider="free", detail=", ".join(sorted(reasons)) or "no available endpoints")
+        raise UserError("search_blocked", provider="DuckDuckGo / Bing", detail=detail)
+    raise UserError("search_failed", provider="free", detail=detail or "no available endpoints")
 
 
 def which_provider() -> str:

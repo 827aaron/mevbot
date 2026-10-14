@@ -18,7 +18,7 @@ from pathlib import Path
 from .. import db
 from ..errors import UserError
 
-VERSION = "2026.10-p4"          # 默认提示词版本（改了默认文字就改这里）
+VERSION = "2026.10-p5"          # 默认提示词版本（改了默认文字就改这里）
 DIR = Path(__file__).parent / "default"
 _VAR = re.compile(r"{{\s*([a-z_]+)\s*}}")
 

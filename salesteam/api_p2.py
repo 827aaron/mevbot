@@ -610,6 +610,12 @@ def chat_clear(agent: str):
     return {"ok": True}
 
 
+@router.delete("/chat/{agent}/messages/{msg_id}")
+def chat_delete_message(agent: str, msg_id: int):
+    chat_mod.delete_message(agent, msg_id)
+    return {"ok": True}
+
+
 # ------------------------------------------------------------------ 快速开始（PRD 3.0）
 
 @router.get("/quickstart")
@@ -710,6 +716,10 @@ def qs_confirm(ob_id: int, data: dict = Depends(body)):
     if tier and st.get("status") == "done":
         out["models"] = model_eval.apply(tier)
     out["model_status"] = model_eval.state().get("status")
+    from . import edition
+    if edition.current()["id"] == "my_igaming":
+        from .agents import preparation
+        out["preparation"] = preparation.request(out["icp_id"])
     return out
 
 

@@ -271,6 +271,7 @@
       '<p class="hint">' + t('spool.taskHint') + '</p></div></div>' +
       '<div class="field" id="urls-wrap"><label class="label">' + t('tasks.urls') + '</label><textarea class="textarea mono" id="t-urls" placeholder="https://www.example-directory.com/members">' + esc(urls) + '</textarea><span class="hint">' + t('tasks.urls_hint') + '</span></div>' +
       '<div class="field"><label class="label">' + t('tasks.target') + ' <span class="req">*</span></label><input class="input num" type="number" id="t-target" min="1" max="500" value="' + esc(target) + '" style="width:140px"><span class="hint" id="t-target-hint">' + t('tasks.target_hint') + '</span></div>' +
+      (S.meta.edition && S.meta.edition.id === 'my_igaming' ? '<div class="field"><label class="label">' + t('tasks.retryCount') + '</label><select class="select" id="t-retry-count">' + [0,1,2,3].map((n) => '<option value="' + n + '"' + (n === 1 ? ' selected' : '') + '>' + t(n ? 'ops.retriesN' : 'ops.noRetries', { n }) + '</option>').join('') + '</select><span class="hint">' + t('tasks.retryHint') + '</span></div>' : '') +
       whenField() + '</div>' +
       '<div class="card-footer" style="justify-content:flex-end"><button class="btn btn-primary" id="t-start" ' + (icps.length ? '' : 'disabled') + '>' + icon('play') + t('tasks.start') + '</button></div></div>';
   }
@@ -359,10 +360,11 @@
       '<div class="field"><label class="label">' + t('tasks.sources') + '</label><div class="col">' + S.meta.sources.map((s) => srcRow(s, (p.sources || []).includes(s), S.tgMonN || 0)).join('') + '</div></div>' +
       '<div class="field"><label class="label">' + t('tasks.target') + '</label><input class="input num" type="number" id="se-target" min="1" max="500" value="' + p.target + '" style="width:140px"><span class="hint">' + t(x.mode === 'daily' ? 'sch.targetDailyHint' : 'tasks.target_hint') + '</span></div>' +
       '<div class="field"><label class="label">' + t('tasks.urls') + '</label><textarea class="textarea mono" id="se-urls">' + esc((p.urls || []).join('\n')) + '</textarea></div>' +
+      (S.meta.edition && S.meta.edition.id === 'my_igaming' ? '<div class="field"><label class="label">' + t('tasks.retryCount') + '</label><select class="select" id="se-retry-count">' + [0,1,2,3].map((n) => '<option value="' + n + '"' + (n === +(p.retry_count || 0) ? ' selected' : '') + '>' + t(n ? 'ops.retriesN' : 'ops.noRetries', { n }) + '</option>').join('') + '</select><span class="hint">' + t('tasks.retryHint') + '</span></div>' : '') +
       '<div class="field"><label class="label">' + t('sch.m.' + x.mode) + '</label>' + (x.mode === 'daily' ? '<input class="input" type="time" id="se-tod" value="' + esc(x.time_of_day) + '" style="width:140px">' : '<input class="input" type="datetime-local" id="se-at" value="' + esc(localInput(x.run_at)) + '" style="width:220px">') + '</div>',
       footer: '<button class="btn btn-secondary" data-action="closeModal">' + t('c.cancel') + '</button><button class="btn btn-primary" id="se-ok">' + t('c.save') + '</button>' });
     U.$('#se-ok', w).onclick = async (e) => {
-      const data = { params: { icp_id: +U.$('#se-icp', w).value, sources: U.$$('[data-src]', w).filter((c) => c.checked).map((c) => c.dataset.src), target: +U.$('#se-target', w).value, urls: U.$('#se-urls', w).value.split(/\s+/).map((v) => v.trim()).filter(Boolean) } };
+      const data = { params: { icp_id: +U.$('#se-icp', w).value, sources: U.$$('[data-src]', w).filter((c) => c.checked).map((c) => c.dataset.src), target: +U.$('#se-target', w).value, urls: U.$('#se-urls', w).value.split(/\s+/).map((v) => v.trim()).filter(Boolean), retry_count: +(U.$('#se-retry-count', w) || {}).value || 0 } };
       if (x.mode === 'daily') data.time = U.$('#se-tod', w).value; else data.at = U.$('#se-at', w).value.replace('T', ' ');
       try { await busy(e.currentTarget, () => api('PUT', '/api/schedules/' + x.id, data)); U.closeModal(); toast(t('c.saved')); U.refresh(); } catch (err) { toastErr(err); }
     };
@@ -401,7 +403,7 @@
           try { localStorage.setItem('st.sources', JSON.stringify(sources)); localStorage.setItem('st.urls', U.$('#t-urls', root).value); localStorage.setItem('st.target', target); } catch (err) { /* ignore */ }
           try {
             const w = when();
-            const r = await busy(e.currentTarget, () => api('POST', '/api/tasks', { icp_id: +U.$('#t-icp', root).value, sources, urls, target, when: w }));
+            const r = await busy(e.currentTarget, () => api('POST', '/api/tasks', { icp_id: +U.$('#t-icp', root).value, sources, urls, target, when: w, retry_count: +(U.$('#t-retry-count', root) || {}).value || 0 }));
             if (r.schedule) { toast(t('sch.saved', { time: r.schedule.next_run_at ? U.fmtTime(r.schedule.next_run_at) : '—' })); U.refresh(); }
             else U.go('run', { task: r.id });
           } catch (err) {
