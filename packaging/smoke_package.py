@@ -102,8 +102,9 @@ def main():
             # Exercise the bundled deletion handlers with disposable local data
             # and mock completions; never use a customer's model or credentials.
             for asset, markers in {
-                "/static/js/mgr-chat.js": ("mgrClear", "mgrForget", "clearDialog"),
+                "/static/js/mgr-chat.js": ("mgrClear", "mgrForget", "clearDialog", "chatCopy", "chatDelete"),
                 "/static/js/pages-team.js": ("chat.forgetAll",),
+                "/static/js/operations.js": ("opsPrepare", "ops-preparation", "ops-remediations"),
             }.items():
                 with opener.open(base + asset, timeout=5) as response:
                     content = response.read().decode("utf-8")
@@ -114,12 +115,23 @@ def main():
             bundled_prompt = next(p for p in prompt_state["items"] if p["name"] == "chat.system")
             if prompt_state["version"] != "2026.10-p5" or "First working principle" not in bundled_prompt["default"]:
                 raise RuntimeError("wrong bundled chat prompt revision")
+            if not any(p["name"] == "manager.source_seed_plan" for p in prompt_state["items"]):
+                raise RuntimeError("missing bundled source preparation prompt")
             for agent in ("manager", "analyst"):
                 request(f"/api/agents/{agent}/config", {"provider": "mock", "model": "mock"}, method="PUT")
                 request(f"/api/agents/{agent}/enabled", {"on": True}, method="PUT")
                 request(f"/api/chat/{agent}", {"message": f"packaged QA {agent}"})
             for agent in ("manager", "analyst", "all"):
                 request("/api/memos", {"agent": agent, "text": f"packaged QA memo {agent}"})
+            before = request("/api/chat/manager")["messages"]
+            if len(before) < 2:
+                raise RuntimeError("packaged mock chat has no disposable messages")
+            removed = before[0]["id"]
+            request(f"/api/chat/manager/messages/{removed}", method="DELETE")
+            after = request("/api/chat/manager")["messages"]
+            if ({m["id"] for m in after} != {m["id"] for m in before if m["id"] != removed}
+                    or len(request("/api/memos")) != 3):
+                raise RuntimeError("packaged single-message deletion has incorrect scope")
             request("/api/chat/manager", method="DELETE")
             if request("/api/chat/manager")["messages"] or len(request("/api/memos")) != 3:
                 raise RuntimeError("bundled history clear failed or removed saved memos")
@@ -131,9 +143,25 @@ def main():
             request("/api/memory/all", method="DELETE")
             if request("/api/memos") or request("/api/chat/analyst")["messages"]:
                 raise RuntimeError("bundled all-agent memory reset failed")
-            chat_checks = {"clear_history": True, "reset_agent_memory": True,
+            chat_checks = {"single_message_delete": True, "clear_history": True, "reset_agent_memory": True,
                            "reset_all_memory": True, "prompt_version": prompt_state["version"],
                            "completions": "local mock only"}
+            profile = request("/api/icps", {"origin": "qa", "data": {
+                "name": "Packaged preparation QA", "product": "Public iGaming agency research",
+                "customer_types": ["affiliate_agency"], "geo_mode": "served_market",
+                "target_markets": ["MY"], "industries": ["iGaming"]}})
+            request("/api/manager/prepare", {"icp_id": profile["id"]})
+            for _ in range(60):
+                preparation = request("/api/manager/state")["preparation"]
+                if preparation.get("phase") == "blocked":
+                    break
+                time.sleep(0.25)
+            if (preparation.get("phase") != "blocked"
+                    or preparation.get("error") != "agent_not_configured"
+                    or request("/api/tasks")):
+                raise RuntimeError(f"packaged preparation did not block an unconfigured model: {preparation}")
+            preparation_checks = {"missing_model_blocks_before_task": True,
+                                  "source_seed_prompt_present": True}
             models = request("/api/relay/models", {"protocol": "openai", "base_url": fixture.base_url,
                                                   "api_key": "tls-test-key"})
             if fixture.model not in models.get("models", []):
@@ -163,7 +191,7 @@ def main():
                 tls_checks["nano_gpt_public_tls"] = "verified; authentication required"
             installers = list(Path("dist").glob("*.dmg")) + list(Path("dist").glob("JamesAgent-Setup-*.exe"))
             result = {"version": expected, "edition": embedded, "commit": os.environ.get("GITHUB_SHA", ""), "checks": checks,
-                      "tls": tls_checks, "chat": chat_checks, "sha256": {p.name: digest(p) for p in installers}}
+                      "tls": tls_checks, "chat": chat_checks, "preparation": preparation_checks, "sha256": {p.name: digest(p) for p in installers}}
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, indent=2), encoding="utf-8")
             print(json.dumps(result))
