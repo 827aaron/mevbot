@@ -83,7 +83,9 @@ class ModelTLSTests(unittest.TestCase):
         with self.assertRaises(UserError) as product_error:
             relay.list_remote({"base_url": self.api.base_url, "api_key": "qa-local-credential"})
         self.assertEqual(product_error.exception.key, "relay_unreachable")
-        self.assertIn("CERTIFICATE_VERIFY_FAILED", product_error.exception.params["detail"])
+        # Apple Security and OpenSSL use different messages for the same
+        # SSLCertVerificationError; the type and zero HTTP requests are decisive.
+        self.assertIn("certificate", product_error.exception.params["detail"].lower())
         self.assertEqual(self.api.requests, [])
 
     def test_trusted_issuer_wrong_hostname_is_rejected(self):
@@ -91,22 +93,26 @@ class ModelTLSTests(unittest.TestCase):
         with self.assertRaises(urllib.error.URLError) as rejected:
             urllib.request.urlopen(self.api.wrong_host_url + "/models", context=tls.context(), timeout=3)
         self.assertIsInstance(rejected.exception.reason, ssl.SSLCertVerificationError)
-        self.assertIn("mismatch", str(rejected.exception.reason).lower())
+        self.assertRegex(str(rejected.exception.reason).lower(), r"mismatch|does not match|hostname")
         with self.assertRaises(UserError) as product_error:
             relay.list_remote({"base_url": self.api.wrong_host_url, "api_key": "qa-local-credential"})
         self.assertEqual(product_error.exception.key, "relay_unreachable")
         self.assertEqual(self.api.requests, [])
 
-    def test_certifi_is_loaded_when_default_openssl_ca_loading_is_missing(self):
-        # Reproduce a frozen interpreter whose compiled default CA path is absent.
-        with mock.patch.object(ssl.SSLContext, "load_default_certs", return_value=None):
+    def test_openssl_fallback_loads_certifi_when_default_ca_loading_is_missing(self):
+        # This specifically exercises the OpenSSL fallback; native truststore
+        # contexts do not implement CA enumeration. Native SDK handshakes and
+        # certificate rejection are covered by the other tests on the real OS.
+        with mock.patch.object(tls.sys, "platform", "linux"), \
+                mock.patch.object(ssl.SSLContext, "load_default_certs", return_value=None):
             context = tls.context()
         self.assertTrue(context.check_hostname)
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertGreater(len(context.get_ca_certs()), 50, "bundled certifi roots were not loaded")
         # A disposable root stands in for certifi contents to prove a real
         # handshake uses that explicit bundle even when default loading does none.
-        with mock.patch.object(ssl.SSLContext, "load_default_certs", return_value=None), \
+        with mock.patch.object(tls.sys, "platform", "linux"), \
+                mock.patch.object(ssl.SSLContext, "load_default_certs", return_value=None), \
                 mock.patch.object(tls.certifi, "where", return_value=str(self.api.ca_file)):
             with urllib.request.urlopen(self.api.base_url + "/models", context=tls.context(), timeout=3) as response:
                 self.assertEqual(json.load(response)["data"][0]["id"], self.api.model)

@@ -4,11 +4,12 @@
 # 测试安装包：无需激活。浏览器组件（Chromium）首次打开时下载。
 import sys
 from pathlib import Path
-from salesteam import edition
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parent
+sys.path.insert(0, str(ROOT))
+from salesteam import edition
 EDITION = edition.current()
 DISPLAY_NAME = EDITION["name"]["zh"]
 VERSION = "0.2.0"
