@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>James Agent</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+  <link rel="stylesheet" href="/static/css/styles.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <img class="brand-logo" src="/static/logo.svg" alt="">
+        <div>
+          <div class="brand-name" data-i18n="app.name"></div>
+          <div class="brand-sub"><span data-i18n="app.tagline"></span></div>
+        </div>
+      </div>
+      <nav class="nav" id="nav" aria-label="main"></nav>
+      <div class="sidebar-foot" id="sidebar-foot"></div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="page-title" id="page-title"></div>
+        <div class="grow"></div>
+        <div class="top-actions">
+          <!-- 其他页面：展开/收起右侧“主管”对话面板（与工作台是同一段对话） -->
+          <button class="btn btn-secondary btn-sm mgr-toggle hidden" id="mgr-toggle" data-action="toggleMgr"></button>
+          <button class="btn btn-ghost btn-icon" data-action="openAlerts" data-i18n-title="top.notifications" style="position:relative" id="bell-btn"></button>
+          <button class="btn btn-ghost btn-icon" id="theme-btn" data-action="toggleTheme" data-i18n-title="top.theme"></button>
+          <div class="seg" id="lang-seg" data-i18n-title="top.lang"></div>
+        </div>
+      </header>
+      <div class="main-body">
+        <main class="content" id="view"></main>
+        <aside class="mgr-panel hidden" id="mgr-panel" aria-label="manager chat"></aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全屏页（快速开始）渲染在这里 -->
+  <div id="fullscreen" class="hidden" style="position:fixed;inset:0;z-index:80;overflow:auto"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="/static/js/icons.js"></script>
+  <script src="/static/js/i18n.js"></script>
+  <script src="/static/js/core.js"></script>
+  <script src="/static/js/charts.js"></script>
+  <script src="/static/js/mgr-chat.js"></script>
+  <script src="/static/js/pages-work.js"></script>
+  <script src="/static/js/pages-team.js"></script>
+  <script src="/static/js/pages-config.js"></script>
+  <script src="/static/js/operations.js"></script>
+  <script src="/static/js/boot.js"></script>
+</body>
+</html>

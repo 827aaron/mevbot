@@ -1,0 +1,85 @@
+{
+  "_说明": [
+    "测试数据（不是产品规则）：假的搜索结果和网页，给“Google 搜索 / 网页爬虫”用。网址全部是保留域名 .example，公司和号码都是编的。",
+    "results：搜索词里出现 when_any 里任意一个词（不分大小写）就返回这组结果；都不出现时用 default。",
+    "pages：每个网址对应的网页内容。公司信息写成“## Company: …”加“- 字段: 值”的格式，假 AI（测试模式）能直接读懂；真实 AI 也能读。",
+    "free_search_mode：模拟“没填搜索 Key、用免费搜索”的情况（只在用 tools/fixture_mock.py 或开发加的测试钩子时有效）：ok = 都能搜到；blocked_first = 第一次被人机验证拦住、之后能搜到；blocked_all = 全部被拦。可以在测试中途直接改这个文件，下一次搜索就按新的值。",
+    "expect：每家公司用真实 AI 时期望的结果，含义见 README.md。"
+  ],
+  "version": 1,
+  "free_search_mode": "blocked_first",
+  "results": [
+    {"when_any": ["diamond", "mlbb", "pubg", "free fire", "钻石", "genshin"], "items": [
+      {"url": "https://direktori-topup-my.example/kedai?page=1", "title": "Direktori Kedai Topup Game Malaysia — halaman 1 (TEST DATA)", "snippet": "Senarai kedai reload dan topup game di Malaysia"},
+      {"url": "https://forum-gamer-my.example/t/cari-pembekal-topup-ipoh", "title": "Cari pembekal topup untuk kedai baru di Ipoh — Forum Gamer MY (TEST DATA)", "snippet": "Saya baru buka kedai, looking to buy wholesale MLBB diamonds…"},
+      {"url": "https://penang-esports-hub.example/", "title": "Penang eSports Hub (TEST DATA)", "snippet": "eSports centre in George Town"}
+    ]},
+    {"when_any": ["topup", "top up", "top-up", "reload", "tambah nilai", "充值", "gift card", "steam", "razer", "google play", "kad"], "items": [
+      {"url": "https://direktori-topup-my.example/kedai?page=2", "title": "Direktori Kedai Topup Game Malaysia — halaman 2 (TEST DATA)", "snippet": "Senarai kedai reload dan topup game di Malaysia"},
+      {"url": "https://kedai-reload-shahalam.example/", "title": "Kedai Reload Shah Alam (TEST DATA)", "snippet": "Reload, topup game, bil"},
+      {"url": "https://lioncity-reload.example/", "title": "Lion City Reload Pte Ltd (TEST DATA)", "snippet": "Singapore reload kiosk"}
+    ]},
+    {"default": true, "items": [
+      {"url": "https://direktori-topup-my.example/kedai?page=1", "title": "Direktori Kedai Topup Game Malaysia — halaman 1 (TEST DATA)", "snippet": "Senarai kedai reload dan topup game di Malaysia"}
+    ]}
+  ],
+  "pages": {
+    "https://direktori-topup-my.example/kedai?page=1": {
+      "title": "Direktori Kedai Topup Game Malaysia — halaman 1 (TEST DATA)",
+      "markdown": "# Direktori Kedai Topup Game Malaysia — halaman 1 (TEST DATA)\n\nCurrently looking to buy wholesale MLBB diamonds and PUBG UC from a new supplier:\n\n## Company: Kedai Reload Seri Kembangan\n- Country: MY\n- Type: retailer\n- Website: https://sk-reload.example/\n- Telegram: @sk_reload_qa\n- WhatsApp: +60 11-0000 8001\n- Contact: Lee Wei, Owner\n- Employees: about 8\n- About: Kedai reload dan topup game di Seri Kembangan, Selangor. Menjual diamond ML, UC PUBG dan kad Steam kepada pelanggan runcit.\n\n## Company: Gamer Point Cyber Cafe\n- Country: MY\n- Type: retailer\n- Website: https://gamerpoint-cafe.example/\n- Email: info@gamerpoint-cafe.example\n- Contact: Tan Mei Hui, Manager\n- Employees: about 20\n- About: Cyber cafe with 60 PCs in Petaling Jaya; sells game credits and gift cards at the counter.\n\n## Company: Phone Galaxy Kajang\n- Country: MY\n- Type: retailer\n- Website: https://phonegalaxy-kajang.example/\n- Contact: Muthu, Owner\n- Employees: about 5\n- About: Kedai telefon di Kajang, juga jual reload dan topup game. Tel 03-0000 8003.\n\n## Company: TopKing Reload Sdn Bhd\n- Country: MY\n- Type: distributor\n- Website: https://topking-reload.example/\n- Telegram: @topking_reload_qa\n- WhatsApp: +60 11-0000 8004\n- Contact: Kenny, Sales\n- Employees: about 40\n- About: Game top-up platform. Open agent now, lowest price in Malaysia, API ready.\n",
+      "links": [["https://wa.me/601100008001", "WhatsApp Kedai Reload Seri Kembangan"]],
+      "expect": {"Kedai Reload Seri Kembangan": "qualified", "Gamer Point Cyber Cafe": "backup（只有邮箱）", "Phone Galaxy Kajang": "backup（只有普通电话，标“可能是 WhatsApp”）", "TopKing Reload Sdn Bhd": "excluded（同行，命中排除词 open agent / 排除公司）"}
+    },
+    "https://direktori-topup-my.example/kedai?page=2": {
+      "title": "Direktori Kedai Topup Game Malaysia — halaman 2 (TEST DATA)",
+      "markdown": "# Direktori Kedai Topup Game Malaysia — halaman 2 (TEST DATA)\n\n## Company: Lion City Reload Pte Ltd\n- Country: SG\n- Type: retailer\n- Website: https://lioncity-reload.example/\n- WhatsApp: +65 0000 8005\n- Contact: Kelvin Goh, Director\n- Employees: about 12\n- About: Reload kiosks in Singapore selling game credits and gift cards.\n\n## Company: Kedai Reload Shah Alam\n- Country: MY\n- Type: retailer\n- Website: https://kedai-reload-shahalam.example/\n- WhatsApp: +60 11-0000 7001\n- Contact: Ahmad, Pemilik\n- Employees: about 6\n- About: Kedai reload di Seksyen 13 Shah Alam dengan cawangan di Kota Bharu.\n\n## Company: Penang eSports Hub\n- Country: MY\n- Type: retailer\n- Website: https://penang-esports-hub.example/\n- Telegram: @penang_esports_hub_qa\n- Contact: Lim Jia Hao, Owner\n- Employees: about 15\n- About: eSports centre in George Town, Penang; sells MLBB diamonds and Valorant points to members.\n\n## Company: Kedai Reload Seri Kembangan\n- Country: MY\n- Type: retailer\n- Website: https://sk-reload.example/\n- Telegram: @sk_reload_qa\n- WhatsApp: +60 11-0000 8001\n- Contact: Lee Wei, Owner\n- About: Kedai reload dan topup game di Seri Kembangan, Selangor.\n",
+      "links": [],
+      "expect": {"Lion City Reload Pte Ltd": "dropped_country（新加坡）", "Kedai Reload Shah Alam": "duplicate_wa（WhatsApp 和 TG 群里的 Ahmad 一样 → 合并成一条，来源有 TG 和网页）", "Penang eSports Hub": "qualified（只有 TG 也算）", "Kedai Reload Seri Kembangan": "duplicate（第 1 页已经有）"}
+    },
+    "https://forum-gamer-my.example/t/cari-pembekal-topup-ipoh": {
+      "title": "Cari pembekal topup untuk kedai baru di Ipoh — Forum Gamer MY (TEST DATA)",
+      "markdown": "# Cari pembekal topup untuk kedai baru di Ipoh (TEST DATA)\n\nPosted by kedaibaru_ipoh · 2 hari lepas\n\nSaya baru buka kedai telefon di Ipoh, looking to buy wholesale MLBB diamonds and PUBG UC, dalam RM 5k sebulan. Sila WhatsApp saya.\n\n## Company: Kedai Baru Ipoh\n- Country: MY\n- Type: retailer\n- Website: https://forum-gamer-my.example/u/kedaibaru_ipoh\n- WhatsApp: +60 11-0000 8010\n- Contact: Faiz, Pemilik\n- About: Kedai telefon baru di Ipoh, Perak.\n\nBalasan: \"Boleh PM saya, saya agen\" — @diamondking_seller_qa\n",
+      "links": [["https://wa.me/601100008010", "WhatsApp"]],
+      "expect": {"Kedai Baru Ipoh": "qualified（论坛里的求购帖，有 wa.me 链接）"}
+    },
+    "https://sk-reload.example/": {
+      "title": "Kedai Reload Seri Kembangan (TEST DATA)",
+      "markdown": "# Kedai Reload Seri Kembangan (TEST DATA)\n\nReload, topup game, bil. Buka 10 pagi – 10 malam.\n\n## Hubungi\nWhatsApp: +60 11-0000 8001\nTelegram: @sk_reload_qa\n",
+      "links": [["https://wa.me/601100008001", "Chat on WhatsApp"], ["https://t.me/sk_reload_qa", "Telegram"]]
+    },
+    "https://gamerpoint-cafe.example/": {
+      "title": "Gamer Point Cyber Cafe (TEST DATA)",
+      "markdown": "# Gamer Point Cyber Cafe (TEST DATA)\n\n60 gaming PCs in Petaling Jaya. Game credits and gift cards at the counter.\n\n## Contact\nEmail: info@gamerpoint-cafe.example\n",
+      "links": []
+    },
+    "https://phonegalaxy-kajang.example/": {
+      "title": "Phone Galaxy Kajang (TEST DATA)",
+      "markdown": "# Phone Galaxy Kajang (TEST DATA)\n\nKedai telefon, aksesori, reload dan topup game.\n\nTel: 03-0000 8003\n",
+      "links": []
+    },
+    "https://topking-reload.example/": {
+      "title": "TopKing Reload (TEST DATA)",
+      "markdown": "# TopKing Reload (TEST DATA)\n\nGame top-up platform for Malaysia. Open agent now — lowest price, API ready. 诚招全马代理。\n",
+      "links": [["https://t.me/topking_reload_qa", "Telegram"]]
+    },
+    "https://lioncity-reload.example/": {
+      "title": "Lion City Reload Pte Ltd (TEST DATA)",
+      "markdown": "# Lion City Reload Pte Ltd (TEST DATA)\n\nReload kiosks in Singapore.\n\nWhatsApp: +65 0000 8005\n",
+      "links": [["https://wa.me/6500008005", "WhatsApp"]]
+    },
+    "https://kedai-reload-shahalam.example/": {
+      "title": "Kedai Reload Shah Alam (TEST DATA)",
+      "markdown": "# Kedai Reload Shah Alam (TEST DATA)\n\nReload dan topup game di Seksyen 13, Shah Alam. Cawangan Kota Bharu.\n\nWhatsApp: +60 11-0000 7001\n",
+      "links": [["https://wa.me/601100007001", "WhatsApp"]]
+    },
+    "https://penang-esports-hub.example/": {
+      "title": "Penang eSports Hub (TEST DATA)",
+      "markdown": "# Penang eSports Hub (TEST DATA)\n\neSports centre in George Town, Penang. Members can buy MLBB diamonds at the counter.\n\nTelegram: @penang_esports_hub_qa\n",
+      "links": [["https://t.me/penang_esports_hub_qa", "Telegram"]]
+    }
+  },
+  "blocked_page": {
+    "title": "DuckDuckGo",
+    "markdown": "Unfortunately, bots use DuckDuckGo too. Please complete the following challenge to confirm this search was made by a human."
+  }
+}

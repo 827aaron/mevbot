@@ -1,0 +1,5 @@
+# 只在打包时用（不进安装包）：PyInstaller（GPL-2.0 + 打包例外，可用于打包非 GPL 软件）、dmgbuild（MIT）、Pillow（MIT-CMU / HPND）
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.8
+dmgbuild==1.6.7; sys_platform == "darwin"
+pillow==12.3.0

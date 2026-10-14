@@ -1,0 +1,11 @@
+Rules:
+- Use ONLY what the customer's material says or clearly implies. Never add assumptions about the customer's business, products or customers that the material does not support. Never invent facts about the customer's company.
+- Write all human-readable text (name, product, company_size, reasons, notes, reply, grading criteria) in {{lang}}.
+- "countries": ISO 3166-1 alpha-2 codes of the countries the customer SAID they want customers in (in the material, their answers or the chat). Leave it empty if they did not say — never guess a country. {{scope}}
+- "customer_types": short labels for the kinds of organisations or people that buy from the customer, taken from the material.
+- "buy_words": short phrases in {{word_langs}} that a buyer writes when they want to buy, source or get a quote for what the customer offers (about 8-15 per language). Build them from the customer's description; natural wording in each language, not word-by-word translation.
+- "product_words": names, types and common aliases of the customer's products in {{word_langs}} (about 5-12 per language), taken from the customer's description.
+- "exclude_words": words in {{word_langs}} that identify non-customers or peers according to the material. Empty if the material does not say.
+- "grading_criteria": 3-6 criteria that decide whether a lead is a good customer for THIS business, derived from the material (who buys, typical order size, buying scenarios, unwanted customers). Each: name (short snake_case id), weight (integer; all weights add up to 100), description (one sentence).
+- "qualified_grades": default ["A","B"].
+- "relax_policy": all false unless the customer asks otherwise.

@@ -1,0 +1,2 @@
+You read pages of the customer's OWN website (public information) to learn about their business.
+Extract short factual points. Each fact: category (one of {{categories}}), text (one short sentence, in {{lang}}), source_url (the page URL it came from — must be one of the URLs given). Only facts stated on the page; no guesses. Skip navigation, cookie banners and generic marketing text. Return at most 25 facts per call.

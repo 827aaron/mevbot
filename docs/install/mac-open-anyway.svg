@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 440" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif">
+  <title>示意图：系统设置 → 隐私与安全性 → 仍要打开（Illustration: System Settings → Privacy &amp; Security → Open Anyway）</title>
+  <rect width="760" height="440" rx="14" fill="#f5f5f7" stroke="#d2d2d7"/>
+  <!-- 标题栏 -->
+  <circle cx="24" cy="22" r="6" fill="#ff5f57"/><circle cx="44" cy="22" r="6" fill="#febc2e"/><circle cx="64" cy="22" r="6" fill="#28c840"/>
+  <text x="380" y="27" text-anchor="middle" font-size="13" fill="#6e6e73">系统设置 / System Settings</text>
+  <!-- 侧边栏 -->
+  <rect x="12" y="44" width="200" height="384" rx="10" fill="#ebebf0"/>
+  <text x="28" y="80" font-size="13" fill="#1d1d1f">通用 General</text>
+  <text x="28" y="108" font-size="13" fill="#1d1d1f">外观 Appearance</text>
+  <text x="28" y="136" font-size="13" fill="#1d1d1f">控制中心 Control Center</text>
+  <rect x="20" y="152" width="184" height="28" rx="6" fill="#4338ca"/>
+  <text x="28" y="171" font-size="13" fill="#ffffff">隐私与安全性 Privacy &amp; Security</text>
+  <text x="28" y="204" font-size="13" fill="#1d1d1f">桌面与程序坞 Desktop &amp; Dock</text>
+  <!-- 右侧内容 -->
+  <text x="236" y="80" font-size="18" font-weight="600" fill="#1d1d1f">隐私与安全性 / Privacy &amp; Security</text>
+  <text x="236" y="112" font-size="12" fill="#6e6e73">向下滚动到“安全性”部分 · Scroll down to the “Security” section</text>
+  <rect x="236" y="128" width="500" height="150" rx="10" fill="#ffffff" stroke="#e5e5ea"/>
+  <text x="252" y="156" font-size="14" font-weight="600" fill="#1d1d1f">安全性 / Security</text>
+  <text x="252" y="186" font-size="13" fill="#1d1d1f">已阻止“詹姆斯智能体”以保护 Mac。</text>
+  <text x="252" y="206" font-size="12" fill="#6e6e73">“詹姆斯智能体” was blocked to protect your Mac.</text>
+  <rect x="560" y="226" width="160" height="36" rx="8" fill="#ffffff" stroke="#e11d48" stroke-width="3"/>
+  <text x="640" y="249" text-anchor="middle" font-size="14" fill="#1d1d1f">仍要打开 / Open Anyway</text>
+  <!-- 标注 -->
+  <path d="M640 300 L640 268" stroke="#e11d48" stroke-width="3" marker-end="url(#a)"/>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#e11d48"/></marker></defs>
+  <text x="640" y="322" text-anchor="middle" font-size="13" fill="#e11d48">点这里，然后输入 Mac 登录密码</text>
+  <text x="640" y="342" text-anchor="middle" font-size="12" fill="#e11d48">Click here, then enter your Mac password</text>
+  <text x="236" y="410" font-size="11" fill="#8e8e93">示意图（不同 macOS 版本的样子会略有不同）· Illustration — looks slightly different between macOS versions</text>
+</svg>

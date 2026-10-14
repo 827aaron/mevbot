@@ -1,0 +1,48 @@
+/* 设计系统（styles.css，原样复用）之外的少量补充：只放设计稿里没有的小组件 */
+
+/* 标签输入（关键词、客户类型等）：外观同 .input */
+.tag-input { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: var(--control-h); padding: 4px 8px;
+  border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface); cursor: text; }
+.tag-input:focus-within { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-soft); }
+.tag-input .tag { gap: 4px; }
+.tag-input .tag button { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1; opacity: .7; }
+.tag-input .tag button:hover { opacity: 1; }
+.tag-input input { flex: 1; min-width: 120px; border: 0; outline: 0; background: transparent; font: inherit; color: var(--color-text); padding: 2px 0; }
+
+/* 表单里的复选项：说明文字换行时对齐 */
+.col > .checkbox { align-items: flex-start; }
+.col > .checkbox input { margin-top: 3px; }
+
+/* 渠道拓展员（范围决定 #5）的身份色：设计稿只有 6 个 AI 的颜色，这里补第 7 个（不改 styles.css） */
+:root { --agent-scout: #4d7c0f; --agent-scout-soft: #eef6e0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --agent-scout: #a3e635; --agent-scout-soft: rgba(163, 230, 53, .14); } }
+:root[data-theme="dark"] { --agent-scout: #a3e635; --agent-scout-soft: rgba(163, 230, 53, .14); }
+[data-agent="scout"] { --agent: var(--agent-scout); --agent-soft: var(--agent-scout-soft); }
+
+/* 0.2.2 白屏修复：很长的网址（如百度验证页网址，没有空格）会把居中布局撑到几千像素宽，内容被挤出窗口外，看起来是白屏。
+   居中页面的内容不再被撑宽；记录 / 网址在任何字符处都可以换行 */
+.center-page > * { min-width: 0; max-width: 100%; }
+.read-box, .read-box *, .alert span, .cell-sub, .bubble-intro { overflow-wrap: anywhere; }
+.company-form .field { margin-bottom: 14px; }
+.company-form .label { display: block; }
+.company-form .textarea { display: block; margin-top: 6px; }
+.company-form .src-chip { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+@media (max-width: 1359px) {
+  .mgr-panel { position: fixed; top: 56px; right: 0; bottom: 0; width: min(380px, calc(100vw - 32px)); z-index: 60; box-shadow: var(--shadow-3); }
+  .mgr-dock { width: min(400px, calc(100vw - 48px)); }
+}
+.mgr-dock .txt { max-height: 150px; overflow: auto; overflow-wrap: anywhere; }
+
+/* Daily plans and ongoing discovery reuse existing cards and inputs. */
+.ops-sources { border: 0; padding: 0; margin: 10px 0; min-width: 0; }
+.ops-manager, .ops-scout, .ops-proposal, .ops-plan { min-width: 0; }
+.ops-proposal p { margin: 8px 0; overflow-wrap: anywhere; }
+.ops-plan { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--color-border); }
+.ops-report-summary { margin-bottom: 10px; }
+.ops-manager .card-header, .ops-scout .card-header, #ops-report .card-header { flex-wrap: wrap; }
+.ops-manager .card-header .actions, #ops-report .card-header .actions { flex-wrap: wrap; }
+#ops-report-day { width: 155px; }
+@media (max-width: 700px) {
+  .ops-manager .form-grid, .ops-scout .form-grid { grid-template-columns: minmax(0,1fr); }
+  .ops-manager .card-header .actions, #ops-report .card-header .actions { margin-left: 0; width: 100%; }
+}

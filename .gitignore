@@ -1,0 +1,76 @@
+# 詹姆斯智能体 / James Agent —— 严格的忽略清单：客户数据、密钥、会话、构建产物、缓存一律不进仓库
+
+# ---- 客户数据与本机运行数据（数据库、导出、上传、浏览器资料、模型、下载的浏览器）
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+exports/
+uploads/
+reports/
+browsers/
+ms-playwright/
+models/
+*.onnx
+
+# ---- 密钥、会话、凭证
+.secret.key
+*.key
+*.pem
+*.p12
+*.session
+*.session-journal
+.env
+.env.*
+secrets/
+keys/
+*credentials*.json
+
+# ---- 虚拟环境、构建、打包产物
+.venv/
+.venv-*/
+venv/
+build/
+dist/
+*.spec.bak
+*.egg-info/
+*.dmg
+*.exe
+*.msi
+*.app/
+packaging/work/
+
+# ---- 缓存
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+*.log
+
+# ---- 浏览器资料目录（登录官网后的 cookie 等）
+browser/
+chrome-prof*/
+*-profile/
+
+# ---- 测试与临时输出
+scratch/
+scratchpad/
+tmp/
+*.out
+test-output*/
+
+# ---- 体积大的截图（需要时单独分享）
+docs/screenshots*/
+design/screenshots/
+
+# ---- 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 给老板的操作截图（含真实号码等个人数据，不上传）
+docs/help/

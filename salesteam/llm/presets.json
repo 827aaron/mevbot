@@ -1,0 +1,881 @@
+{
+  "version": "2026-10-13.1",
+  "status": "pending real-key evaluation",
+  "note": "Only a HINT for shortlisting and an offline fallback. The real choice is made by running the built-in test sets against the relay's live catalog (PRD 2.4.1). Model ids follow OpenRouter naming as seen in its public /api/v1/models catalog on 2026-10-13.",
+  "relays": {
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "models_url": "https://openrouter.ai/api/v1/models",
+      "recommended": true
+    }
+  },
+  "advisor_priority": [
+    "anthropic/claude-opus-5.5",
+    "anthropic/claude-fable-5.1",
+    "openai/gpt-6.1-sol-pro",
+    "openai/gpt-6.1-sol",
+    "google/gemini-3.8-pro",
+    "anthropic/claude-sonnet-5.5",
+    "mock/strong-pro"
+  ],
+  "roles": {
+    "manager": {
+      "needs": [
+        "structured"
+      ],
+      "hint": [
+        "claude-opus",
+        "claude-fable",
+        "gpt-6.1-sol",
+        "gemini-3.8-pro",
+        "strong"
+      ],
+      "candidates": 3,
+      "quality_bar": 0.8
+    },
+    "researcher": {
+      "needs": [
+        "structured"
+      ],
+      "hint": [
+        "claude-sonnet",
+        "gemini-3.8-flash",
+        "deepseek-v4",
+        "qwen3.8",
+        "balanced",
+        "cheap"
+      ],
+      "candidates": 3,
+      "quality_bar": 0.65
+    },
+    "monitor": {
+      "needs": [
+        "structured"
+      ],
+      "hint": [
+        "claude-haiku",
+        "gemini-3.8-flash",
+        "deepseek-v4.1-flash",
+        "qwen3.8-flash",
+        "cheap",
+        "tiny"
+      ],
+      "candidates": 3,
+      "quality_bar": 0.55
+    },
+    "analyst": {
+      "needs": [
+        "structured"
+      ],
+      "hint": [
+        "claude-sonnet",
+        "gpt-6-luna",
+        "gemini-3.8-flash",
+        "deepseek-v4-pro",
+        "balanced",
+        "strict"
+      ],
+      "candidates": 3,
+      "quality_bar": 0.7
+    },
+    "sales": {
+      "needs": [],
+      "hint": [
+        "claude-opus",
+        "claude-sonnet",
+        "gpt-6.1-sol",
+        "kimi-k3",
+        "strong",
+        "balanced"
+      ],
+      "candidates": 3,
+      "quality_bar": 0.7
+    },
+    "followup": {
+      "needs": [
+        "structured"
+      ],
+      "hint": [
+        "claude-sonnet",
+        "gpt-6-luna",
+        "qwen3.8-max",
+        "balanced",
+        "cheap"
+      ],
+      "candidates": 2,
+      "quality_bar": 0.65
+    },
+    "scout": {
+      "needs": [
+        "structured"
+      ],
+      "hint": [
+        "gemini-3.8-flash",
+        "deepseek-v4.1-flash",
+        "qwen3.8-flash",
+        "claude-haiku",
+        "cheap"
+      ],
+      "candidates": 3,
+      "quality_bar": 0.55
+    }
+  },
+  "decision_candidates": [
+    "microsoft/microsoft-decision-1",
+    "typesafe/jev-1.13"
+  ],
+  "monthly_tokens": {
+    "manager": [
+      2000000,
+      300000
+    ],
+    "researcher": [
+      12000000,
+      1500000
+    ],
+    "monitor": [
+      20000000,
+      1000000
+    ],
+    "analyst": [
+      15000000,
+      2500000
+    ],
+    "sales": [
+      3000000,
+      1500000
+    ],
+    "followup": [
+      3000000,
+      800000
+    ],
+    "decision": [
+      10000000,
+      0
+    ],
+    "scout": [
+      2000000,
+      200000
+    ]
+  },
+  "auto_run_max_usd": 1.0,
+  "relay_presets": [
+    {
+      "key": "openrouter",
+      "name": "OpenRouter",
+      "kind": "openai",
+      "base_url": "https://openrouter.ai/api/v1",
+      "recommended": true,
+      "pricing": true,
+      "decisions": true
+    },
+    {
+      "key": "vercel",
+      "name": "Vercel AI Gateway",
+      "kind": "openai",
+      "base_url": "https://ai-gateway.vercel.sh/v1"
+    },
+    {
+      "key": "claude",
+      "name": "Claude (Anthropic official)",
+      "kind": "anthropic",
+      "base_url": "https://api.anthropic.com"
+    },
+    {
+      "key": "openai",
+      "name": "OpenAI (official)",
+      "kind": "openai",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "key": "deepseek",
+      "name": "DeepSeek (official)",
+      "kind": "openai",
+      "base_url": "https://api.deepseek.com/v1"
+    },
+    {
+      "key": "gemini",
+      "name": "Gemini (Google official)",
+      "kind": "openai",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai"
+    },
+    {
+      "key": "qwen",
+      "name": "Qwen (Alibaba Cloud intl)",
+      "kind": "openai",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    },
+    {
+      "key": "kimi",
+      "name": "Kimi (Moonshot)",
+      "kind": "openai",
+      "base_url": "https://api.moonshot.ai/v1"
+    },
+    {
+      "key": "custom",
+      "name": "Custom API (OpenAI-compatible)",
+      "kind": "openai",
+      "base_url": ""
+    },
+    {
+      "key": "mock_a",
+      "name": "Test relay A (mock)",
+      "kind": "mock",
+      "base_url": "mock://relay-a",
+      "test_only": true,
+      "pricing": true
+    },
+    {
+      "key": "mock_b",
+      "name": "Test relay B (mock, no pricing)",
+      "kind": "mock",
+      "base_url": "mock://relay-b",
+      "test_only": true
+    }
+  ],
+  "budget_token_fallback": {
+    "daily_tokens": 5000000,
+    "monthly_tokens": 100000000
+  },
+  "decision_quality_bar": 0.7,
+  "format_bar": 1.0,
+  "selection_weights": {
+    "price": 0.5,
+    "speed": 0.2,
+    "refusal": 0.3
+  },
+  "selection_note": "PRD 2.4.1: 'good enough' beats 'strongest'. Gate = every role test returns valid format (format_bar) and the average test score reaches the role's quality_bar. Among models that pass, quality no longer adds points: primary = best weighted score of price (lower better), speed (faster better) and refusal rate (lower better), each min-max normalised across the passing models (unknown price counts as the most expensive). Backup = lowest refusal rate among the remaining passing models (ties: cheaper, then a different vendor).",
+  "low_refusal": [
+    "claude-sonnet",
+    "claude-haiku",
+    "gemini-3.8-flash",
+    "deepseek-v4",
+    "qwen3.8",
+    "balanced",
+    "cheap-flash",
+    "strong-pro"
+  ],
+  "low_refusal_note": "Offline hint only (used when this install has no refusal statistics yet for a model).",
+  "reference_prices": {
+    "_note": "参考价（美元 / 百万 token，按官方价格页；有高峰 / 分档时取较高的那个）。随软件版本更新。verified=false = 按家族估算（偏高）。API 返回的价格、客户自己填的价格优先。",
+    "checked": "2026-10-14",
+    "default_estimate": {
+      "in": 3.0,
+      "out": 15.0,
+      "note": "什么都查不到时的估算：取中档模型价格区间的偏高处（约等于 Claude Sonnet / Kimi-K3 档），宁可多算，让美元预算一定生效"
+    },
+    "models": [
+      {
+        "match": "deepseek-v4-pro",
+        "in": 1.32,
+        "out": 3.96,
+        "verified": true,
+        "source": "api-docs.deepseek.com/quick_start/pricing (peak)"
+      },
+      {
+        "match": "deepseek-flash",
+        "in": 0.3,
+        "out": 1.2,
+        "verified": true,
+        "source": "api-docs.deepseek.com/quick_start/pricing (peak)"
+      },
+      {
+        "match": "qwen3.8-max",
+        "in": 2.0,
+        "out": 6.0,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen3.7-max",
+        "in": 2.5,
+        "out": 7.5,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen-max",
+        "in": 1.6,
+        "out": 6.4,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen3.7-plus",
+        "in": 0.4,
+        "out": 1.6,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen3.6-plus",
+        "in": 0.5,
+        "out": 3.0,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen3.5-plus",
+        "in": 0.4,
+        "out": 2.4,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen-plus",
+        "in": 0.4,
+        "out": 4.0,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing (thinking output)"
+      },
+      {
+        "match": "qwen3.8-flash",
+        "in": 0.15,
+        "out": 0.47,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen3.7-flash",
+        "in": 0.03,
+        "out": 0.13,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen3.6-flash",
+        "in": 0.25,
+        "out": 1.5,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen3.5-flash",
+        "in": 0.1,
+        "out": 0.4,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "qwen-flash",
+        "in": 0.05,
+        "out": 0.4,
+        "verified": true,
+        "source": "alibabacloud.com model-studio pricing"
+      },
+      {
+        "match": "kimi-k3",
+        "in": 3.0,
+        "out": 15.0,
+        "verified": true,
+        "source": "platform.kimi.ai/docs/pricing/chat"
+      },
+      {
+        "match": "kimi-k2.7-code",
+        "in": 0.95,
+        "out": 4.0,
+        "verified": true,
+        "source": "platform.kimi.ai/docs/pricing/chat"
+      },
+      {
+        "match": "kimi-k2.6",
+        "in": 0.95,
+        "out": 4.0,
+        "verified": true,
+        "source": "platform.kimi.ai/docs/pricing/chat"
+      },
+      {
+        "match": "glm-5.3",
+        "in": 1.4,
+        "out": 4.4,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-5.2",
+        "in": 1.4,
+        "out": 4.4,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-5.1",
+        "in": 1.4,
+        "out": 4.4,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-5",
+        "in": 1.0,
+        "out": 3.2,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-5.3-flash",
+        "in": 0.15,
+        "out": 0.5,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-5.3-flashx",
+        "in": 0.37,
+        "out": 1.25,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-4.7",
+        "in": 0.6,
+        "out": 2.2,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-4.6",
+        "in": 0.6,
+        "out": 2.2,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-4.5",
+        "in": 0.6,
+        "out": 2.2,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-4.5-air",
+        "in": 0.2,
+        "out": 1.1,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "glm-4.7-flashx",
+        "in": 0.07,
+        "out": 0.4,
+        "verified": true,
+        "source": "docs.z.ai pricing"
+      },
+      {
+        "match": "gemini-4-argon",
+        "in": 2.0,
+        "out": 10.0,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-3.8-flash",
+        "in": 0.75,
+        "out": 3.75,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-3.6-flash",
+        "in": 0.75,
+        "out": 3.75,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-3.5-flash-lite",
+        "in": 0.3,
+        "out": 2.5,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-3.1-flash-lite",
+        "in": 0.25,
+        "out": 1.5,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-3.1-pro",
+        "in": 2.0,
+        "out": 12.0,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-3-flash",
+        "in": 0.5,
+        "out": 3.0,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-2.5-pro",
+        "in": 1.25,
+        "out": 10.0,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-2.5-flash",
+        "in": 0.3,
+        "out": 2.5,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gemini-2.5-flash-lite",
+        "in": 0.1,
+        "out": 0.4,
+        "verified": true,
+        "source": "ai.google.dev pricing"
+      },
+      {
+        "match": "gpt-6-astra",
+        "in": 10.0,
+        "out": 50.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-6.1-sol",
+        "in": 2.0,
+        "out": 10.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-6-sol",
+        "in": 2.0,
+        "out": 10.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-6-luna",
+        "in": 0.1,
+        "out": 0.5,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.6-sol",
+        "in": 4.0,
+        "out": 20.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.6-terra",
+        "in": 2.0,
+        "out": 12.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.6-luna",
+        "in": 0.2,
+        "out": 1.2,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.5",
+        "in": 5.0,
+        "out": 30.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.4",
+        "in": 2.5,
+        "out": 15.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.4-mini",
+        "in": 0.75,
+        "out": 4.5,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.4-nano",
+        "in": 0.2,
+        "out": 1.25,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.2",
+        "in": 1.75,
+        "out": 14.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5.1",
+        "in": 1.25,
+        "out": 10.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5",
+        "in": 1.25,
+        "out": 10.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5-mini",
+        "in": 0.25,
+        "out": 2.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-5-nano",
+        "in": 0.05,
+        "out": 0.4,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-4.1",
+        "in": 2.0,
+        "out": 8.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-4.1-mini",
+        "in": 0.4,
+        "out": 1.6,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-4.1-nano",
+        "in": 0.1,
+        "out": 0.4,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-4o",
+        "in": 2.5,
+        "out": 10.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "gpt-4o-mini",
+        "in": 0.15,
+        "out": 0.6,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "o3",
+        "in": 2.0,
+        "out": 8.0,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "o4-mini",
+        "in": 1.1,
+        "out": 4.4,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "o3-mini",
+        "in": 1.1,
+        "out": 4.4,
+        "verified": true,
+        "source": "developers.openai.com pricing"
+      },
+      {
+        "match": "claude-opus-5-5",
+        "in": 4.0,
+        "out": 20.0,
+        "verified": true,
+        "source": "platform.claude.com pricing"
+      },
+      {
+        "match": "claude-opus-5",
+        "in": 5.0,
+        "out": 25.0,
+        "verified": true,
+        "source": "platform.claude.com pricing"
+      },
+      {
+        "match": "claude-sonnet-5-5",
+        "in": 2.0,
+        "out": 10.0,
+        "verified": true,
+        "source": "platform.claude.com pricing"
+      },
+      {
+        "match": "claude-sonnet-5",
+        "in": 2.0,
+        "out": 10.0,
+        "verified": true,
+        "source": "platform.claude.com pricing"
+      },
+      {
+        "match": "claude-sonnet-4-6",
+        "in": 3.0,
+        "out": 15.0,
+        "verified": true,
+        "source": "platform.claude.com pricing"
+      },
+      {
+        "match": "claude-sonnet-4-5",
+        "in": 3.0,
+        "out": 15.0,
+        "verified": true,
+        "source": "platform.claude.com pricing"
+      },
+      {
+        "match": "claude-haiku-5-5",
+        "in": 0.5,
+        "out": 2.5,
+        "verified": true,
+        "source": "platform.claude.com pricing (long-prompt rate, the higher one)"
+      },
+      {
+        "match": "claude-haiku-4-5",
+        "in": 1.0,
+        "out": 5.0,
+        "verified": true,
+        "source": "platform.claude.com pricing"
+      }
+    ],
+    "families": [
+      {
+        "match": "deepseek.*(flash|chat|lite)",
+        "in": 0.3,
+        "out": 1.2,
+        "verified": false,
+        "source": "family estimate from deepseek-flash"
+      },
+      {
+        "match": "deepseek",
+        "in": 1.32,
+        "out": 3.96,
+        "verified": false,
+        "source": "family estimate from deepseek-v4-pro (higher tier)"
+      },
+      {
+        "match": "qwen.*(flash|turbo)",
+        "in": 0.25,
+        "out": 1.5,
+        "verified": false,
+        "source": "family estimate (upper range of qwen flash)"
+      },
+      {
+        "match": "qwen.*plus",
+        "in": 0.5,
+        "out": 4.0,
+        "verified": false,
+        "source": "family estimate (upper range of qwen plus)"
+      },
+      {
+        "match": "qwen",
+        "in": 2.5,
+        "out": 7.5,
+        "verified": false,
+        "source": "family estimate (qwen max tier)"
+      },
+      {
+        "match": "kimi|moonshot",
+        "in": 3.0,
+        "out": 15.0,
+        "verified": false,
+        "source": "family estimate (kimi-k3)"
+      },
+      {
+        "match": "glm.*(flash|air)",
+        "in": 0.37,
+        "out": 1.25,
+        "verified": false,
+        "source": "family estimate (upper range of glm flash / air)"
+      },
+      {
+        "match": "glm",
+        "in": 1.4,
+        "out": 4.4,
+        "verified": false,
+        "source": "family estimate (glm-5.x)"
+      },
+      {
+        "match": "gemini.*lite",
+        "in": 0.3,
+        "out": 2.5,
+        "verified": false,
+        "source": "family estimate (gemini flash-lite)"
+      },
+      {
+        "match": "gemini.*flash",
+        "in": 0.75,
+        "out": 3.75,
+        "verified": false,
+        "source": "family estimate (gemini flash)"
+      },
+      {
+        "match": "gemini",
+        "in": 2.0,
+        "out": 12.0,
+        "verified": false,
+        "source": "family estimate (gemini pro)"
+      },
+      {
+        "match": "gpt.*(nano|luna)",
+        "in": 0.2,
+        "out": 1.25,
+        "verified": false,
+        "source": "family estimate (gpt nano / luna)"
+      },
+      {
+        "match": "gpt.*mini",
+        "in": 0.75,
+        "out": 4.5,
+        "verified": false,
+        "source": "family estimate (gpt mini)"
+      },
+      {
+        "match": "^gpt|^o[1-9]",
+        "in": 5.0,
+        "out": 30.0,
+        "verified": false,
+        "source": "family estimate (gpt flagship)"
+      },
+      {
+        "match": "claude.*haiku",
+        "in": 1.0,
+        "out": 5.0,
+        "verified": false,
+        "source": "family estimate (claude haiku)"
+      },
+      {
+        "match": "claude.*sonnet",
+        "in": 3.0,
+        "out": 15.0,
+        "verified": false,
+        "source": "family estimate (claude sonnet)"
+      },
+      {
+        "match": "claude",
+        "in": 5.0,
+        "out": 25.0,
+        "verified": false,
+        "source": "family estimate (claude opus)"
+      }
+    ]
+  }
+}

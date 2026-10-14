@@ -1,0 +1,52 @@
+{
+  "_说明": "测试数据（不是产品规则）：老板举的例子——卖网络游戏充值的公司，找马来西亚的游戏充值代理 / 经销商。用法：POST /api/icps，请求体 = {\"data\": 下面的 data}；或在「模板管理」里照着填。countries_text 是“目标国家（一句话）”输入框要填的话，countries 是期望 AI 理解出来的结果。所有公司、网址、号码都是编的。",
+  "countries_text": "马来西亚，主要是吉隆坡、雪兰莪、柔佛、槟城一带",
+  "expect": {
+    "countries": ["MY"],
+    "ai_understood_hint": "输入框下方应显示类似“AI 理解为：马来西亚”",
+    "word_languages": ["zh", "en", "ms"]
+  },
+  "quickstart_input": {
+    "oneliner": "我们是星河数娱（测试），做网络游戏充值批发：Mobile Legends 钻石、PUBG Mobile UC、Free Fire 钻石、原神创世结晶，以及 Steam / Google Play / Razer Gold 礼品卡；提供 API 直充和卡密批量供货，想找马来西亚的游戏充值代理、经销商、网吧和手机店。",
+    "interview_answers": [
+      "成交最多的是开手机店、网吧的小老板，还有在 Shopee / Lazada 开充值店的线上卖家。",
+      "不要：同行充值平台、招代理的人、卖账号 / 外挂 / 代练的、和博彩有关的。",
+      "一般一个客户每月充值量 RM 3,000 到 50,000。",
+      "目标国家：马来西亚，主要吉隆坡、雪兰莪、柔佛、槟城。"
+    ]
+  },
+  "data": {
+    "name": "马来西亚游戏充值代理（测试）",
+    "product": "网络游戏充值批发（测试数据）：Mobile Legends 钻石、PUBG Mobile UC、Free Fire 钻石、原神创世结晶、王者荣耀点券；Steam 钱包卡、Google Play 礼品卡、Razer Gold。提供 API 直充和卡密（PIN）批量供货，价格稳定、24 小时到账。",
+    "countries": ["MY"],
+    "countries_text": "马来西亚，主要是吉隆坡、雪兰莪、柔佛、槟城一带",
+    "customer_types": ["agent", "distributor", "online_seller", "retailer"],
+    "industries": ["游戏充值 / 数字点卡"],
+    "company_size": "个人代理到 50 人以内的门店 / 网店",
+    "order_size": "每月 RM 3,000 – 50,000 的充值量",
+    "purchase_scenarios": ["新开店需要稳定的上家", "现在的上家掉单或价格高，想换", "做活动需要大批卡密"],
+    "buy_words": [
+      "求购", "找供应商", "找货源", "找上家", "求上家", "换上家", "要拿货", "批发价", "报价",
+      "looking for supplier", "looking for a supplier", "need supplier", "need a supplier", "any supplier", "who can supply",
+      "wholesale", "bulk", "reseller price", "quote", "need stock",
+      "cari pembekal", "cari supplier", "perlukan pembekal", "nak tukar pembekal", "harga borong", "pukal", "sebut harga",
+      "senarai harga", "boleh supply"
+    ],
+    "product_words": [
+      "游戏充值", "充值", "钻石", "点卡", "点券", "礼品卡", "卡密", "直充", "创世结晶", "Steam 钱包",
+      "game top up", "top-up", "topup", "reload", "diamonds", "diamond", "MLBB", "Mobile Legends", "PUBG UC", "UC PUBG",
+      "Free Fire", "Genshin", "gift card", "Steam wallet", "Google Play", "Razer Gold", "PIN codes",
+      "topup game", "tambah nilai", "kad prabayar", "kod PIN", "diamond ML", "kad Steam"
+    ],
+    "exclude_words": [
+      "诚招", "招代理", "收代理", "免费钻石", "外挂", "代练", "卖号", "博彩",
+      "open agent", "free diamonds", "casino", "slot", "hack", "cheat", "account for sale", "betting",
+      "buka agen", "cari agen", "diamond percuma", "judi", "jual akaun", "joki"
+    ],
+    "exclude_companies": ["TopKing Reload Sdn Bhd（同行，测试）"],
+    "reference_customers": ["https://kedai-reload-shahalam.example/"],
+    "contact_titles": ["老板 / Owner / Pemilik kedai", "采购 / Purchasing"],
+    "relax_policy": {"allow_neighbor_countries": false, "allow_change_customer_type": false, "allow_more_industries": false, "notes": ""},
+    "qualified_grades": ["A", "B"]
+  }
+}
