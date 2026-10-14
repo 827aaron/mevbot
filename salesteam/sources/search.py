@@ -5,11 +5,12 @@
 客户自备 Key，Key 加密保存在本地。
 """
 import json
+import base64
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from .. import settings
+from .. import settings, tls
 from ..errors import UserError
 from . import mockweb
 from .crawler import Crawler, Skip
@@ -19,7 +20,7 @@ TIMEOUT = 20
 
 def _http_json(req: urllib.request.Request, provider: str):
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        with urllib.request.urlopen(req, timeout=TIMEOUT, context=tls.context()) as r:
             return json.load(r)
     except urllib.error.HTTPError as e:
         if e.code in (401, 403) or (provider == "Brave" and e.code == 422):
@@ -104,20 +105,41 @@ def _challenged(page: dict) -> bool:
 
 
 def _parse(name: str, page: dict, n: int) -> list[dict]:
+    if n <= 0:
+        return []
     out = []
+    excluded = ("duckduckgo.com", "bing.com", "microsoft.com", "msn.com", "live.com", "doubleclick.net",
+                "googleadservices.com", "googlesyndication.com")
+
+    def is_host(host, domain):
+        return host == domain or host.endswith("." + domain)
+
     for href, text in page.get("links", []):
-        if name == "bing":
-            host = urllib.parse.urlparse(href).netloc.lower()
-            if not host or any(x in host for x in ("bing.com", "microsoft.com", "msn.com", "live.com")) or \
-                    not href.startswith("http"):
+        try:
+            real = urllib.parse.urljoin(page.get("url") or _endpoint_url(name, "", "", ""), str(href).strip())
+            parsed = urllib.parse.urlsplit(real)
+            host = (parsed.hostname or "").lower()
+            query = urllib.parse.parse_qs(parsed.query)
+            if is_host(host, "duckduckgo.com"):
+                if parsed.path.startswith("/y.js"):
+                    continue
+                real = query.get("uddg", [""])[0]
+            elif is_host(host, "bing.com"):
+                if parsed.path.rstrip("/") != "/ck/a":
+                    continue
+                target = query.get("u", [""])[0]
+                if target.startswith("a1"):
+                    encoded = target[2:]
+                    target = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8")
+                real = target
+            parsed = urllib.parse.urlsplit(real)
+            host = (parsed.hostname or "").lower()
+            if parsed.scheme not in ("http", "https") or not host or parsed.username is not None or \
+                    parsed.password is not None or any(is_host(host, domain) for domain in excluded):
                 continue
-            real = href
-        else:
-            if "uddg=" not in href:
-                continue
-            real = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get("uddg", [""])[0]
-            if not real or "duckduckgo.com" in real:
-                continue
+            real = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+        except (ValueError, UnicodeError):
+            continue
         if all(r["url"] != real for r in out):
             out.append({"url": real, "title": text, "snippet": ""})
         if len(out) >= n:
@@ -130,32 +152,49 @@ def free(query, country="", lang="", n=8, crawler: Crawler | None = None):
     from scrapling.fetchers import Fetcher  # noqa: F401  确保依赖存在
     crawler = crawler or Crawler()
     st = _state(crawler)
+    if crawler.should_stop():
+        raise UserError("search_failed", provider="free", detail="cancelled")
+    st["last"] = {"attempted": [], "empty": [], "failed": {}, "results": 0}
+    last = st["last"]
     if st["stealth_ok"]:                       # 前面隐身重试成功过：这个任务里直接用隐身方式
         page = _stealth_fetch(_endpoint_url("ddg_lite", query, country, lang), crawler)
         if page and not _challenged(page):
-            return _parse("ddg_lite", page, n)
+            results = _parse("ddg_lite", page, n)
+            if results:
+                last["results"] = len(results)
+                return results
         st["stealth_ok"] = False
     for name in FREE_ENDPOINTS:
         if name in st["dead"]:
+            last["failed"][name] = st["dead"][name]
             continue
+        last["attempted"].append(name)
         try:
             page = _endpoint_fetch(name, _endpoint_url(name, query, country, lang), crawler)
         except Skip as e:
-            if e.key in ("ev.cancelled",):
-                raise UserError("search_failed", provider="free", detail="cancelled")
+            if e.key in ("ev.cancelled", "ev.crawl_task_limit", "ev.crawl_daily_limit"):
+                raise UserError("search_failed", provider="free", detail=e.key)
             st["dead"][name] = e.key            # 被拦 / 暂停 / robots 不允许 / 读不到：这个任务里不再用这个入口
+            last["failed"][name] = e.key
             continue
         if _challenged(page):
             st["dead"][name] = "challenge"
+            last["failed"][name] = "challenge"
             continue
-        return _parse(name, page, n)
-    if not st["stealth_tried"]:                # 都不行：按隐身规则用真实浏览器重试一次（隐身模式关闭时不试）
-        st["stealth_tried"] = True
-        page = _stealth_fetch(_endpoint_url("ddg_lite", query, country, lang), crawler)
-        if page and not _challenged(page):
-            st["stealth_ok"] = True
-            return _parse("ddg_lite", page, n)
-    raise UserError("search_blocked", provider="DuckDuckGo / Bing")
+        results = _parse(name, page, n)
+        if results:
+            last["results"] = len(results)
+            return results
+        last["empty"].append(name)
+    if last["empty"]:
+        return []
+    # Crawler.fetch already handles its permitted browser check fallback.
+    # Do not retry human verification, robots denial or limits via another browser.
+    reasons = set(last["failed"].values())
+    blocked = {"challenge", "ev.crawl_challenge", "ev.robots_blocked", "ev.domain_paused", "ev.domain_cooldown"}
+    if reasons and reasons <= blocked:
+        raise UserError("search_blocked", provider="DuckDuckGo / Bing")
+    raise UserError("search_failed", provider="free", detail=", ".join(sorted(reasons)) or "no available endpoints")
 
 
 def which_provider() -> str:

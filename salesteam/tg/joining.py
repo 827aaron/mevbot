@@ -10,7 +10,7 @@ import re
 import time
 from functools import wraps
 
-from .. import alerts, db, llm, prompts, settings
+from .. import alerts, db, edition, llm, prompts, settings
 from ..errors import UserError
 from ..llm import decision
 from . import base, pool
@@ -116,6 +116,7 @@ def _join_with(ls, acc, item, cfg) -> dict:
         row = db.query_one("SELECT id FROM tg_chats WHERE account_id=? AND chat_id=?", (acc["id"], str(chat["chat_id"])))
         if row:
             pool.set_monitored([row["id"]], True, item["icp_id"])
+            db.execute("UPDATE tg_join_queue SET tg_chat_id=? WHERE id=?", (row["id"], item["id"]))
         return {"joined": item["link"]}
     except base.NeedsApproval:
         ls.use("join")
@@ -220,6 +221,8 @@ def discover(icp_id: int, emit=None, max_groups=25, auto_queue=True) -> dict:
                                                                     "source": "web"})
     # 已在名单或已加入的跳过
     joined = {r["username"].lower() for r in db.query("SELECT username FROM tg_chats WHERE username<>'' AND left_at IS NULL")}
+    known = {r["link"] for r in db.query("SELECT link FROM tg_discoveries")}
+    duplicated = sum(link in known or (c.get("username") or "").lower() in joined for link, c in found.items())
     cands = [(link, c) for link, c in found.items() if (c.get("username") or "").lower() not in joined][:max_groups]
     # 3) 读取公开信息（人数、简介、最近消息，估算活跃度）
     infos = []
@@ -228,7 +231,7 @@ def discover(icp_id: int, emit=None, max_groups=25, auto_queue=True) -> dict:
         if p:
             infos.append((link, {**c, **p}))
     if not infos:
-        return {"added": 0}
+        return {"added": 0, "discovered": len(found), "deduplicated": duplicated, "evaluated": 0, "queued": 0, "discovery_ids": []}
     # 4) 判断模型先筛广告群（拿不准的交给大模型）；大模型批量评估
     text_items = []
     for i, (link, c) in enumerate(infos):
@@ -241,8 +244,12 @@ def discover(icp_id: int, emit=None, max_groups=25, auto_queue=True) -> dict:
                             prompts.render("scout.group_eval", scope=prompts.get("scope.v1") if countries.V1_SCOPE else ""),
                             user, DISC_SCHEMA,
                             context={"groups": [c for _, c in infos], "icp": icp})
-    added = 0
-    for g in data.get("groups") or []:
+    added, discovery_ids = 0, []
+    evaluations = data.get("groups") or []
+    if edition.signal_mode(icp):
+        by_index = {g.get("idx"): g for g in evaluations if isinstance(g.get("idx"), int)}
+        evaluations = [{"idx": i, **by_index.get(i, {})} for i in range(len(infos))]
+    for g in evaluations:
         i = g.get("idx")
         if not isinstance(i, int) or not 0 <= i < len(infos):
             continue
@@ -256,17 +263,36 @@ def discover(icp_id: int, emit=None, max_groups=25, auto_queue=True) -> dict:
                 # 判断模型只能淘汰、不能放行（PRD 2.3）：只能把“像广告群”的概率往上调，不能把大模型判断的调低
                 ad = max(ad, float(d.probs.get("ad_group", ad)))
         score = round(rel * (1 - ad) * 100)
+        reason = str(g.get("reason", ""))[:300]
+        if edition.signal_mode(icp):
+            # Public group/channel description binds the signal to this source;
+            # anonymous member messages do not define the group as an agent.
+            source_text = str(c.get("title") or "") + "\n" + str(c.get("about") or "")
+            signal = edition.validate_b2b(icp, [{"url": link, "text": source_text}])
+            industry = re.compile(r"\bigaming\b|\bcasinos?\b|\bsportsbook\b|\bgambling\b|\bbetting\b|博彩|赌博|\bkasino\b|\bpertaruhan\b", re.I)
+            source_quotes = [{"url": link, "quote": sentence[:1200]} for sentence in edition._sentences(source_text) if industry.search(sentence)]
+            source_signal = {"status": "matched" if source_quotes else "unverified", "kind": "industry_source", "evidence": source_quotes[:10]}
+            reason = db.dumps({"model_reason": reason, "agent_signal": signal, "source_signal": source_signal})
+            try:
+                from .. import source_pool
+                source_pool.learn_keywords(icp_id, [{"url": e["url"], "text": e["quote"]} for e in signal["evidence"]])
+            except ImportError:
+                pass
         try:
             db.execute("INSERT INTO tg_discoveries(icp_id, link, title, about, members, activity, relevance, ad_prob, "
                        "score, reason, source, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                        (icp_id, link, c.get("title", ""), c.get("about", "")[:500], int(c.get("members") or 0),
-                        str(c.get("msgs_per_day", "")), rel, ad, score, g.get("reason", "")[:300],
+                        str(c.get("msgs_per_day", "")), rel, ad, score, reason,
                         c.get("source", ""), db.now()))
             added += 1
         except Exception:  # noqa: BLE001  已推荐过（UNIQUE link）
             db.execute("UPDATE tg_discoveries SET relevance=?, ad_prob=?, score=?, reason=? WHERE link=? AND "
-                       "status='suggested'", (rel, ad, score, g.get("reason", "")[:300], link))
-    return {"added": added, "evaluated": len(infos), "queued": auto_queue_discoveries(icp_id) if auto_queue else 0}
+                       "status='suggested'", (rel, ad, score, reason, link))
+        row = db.query_one("SELECT id FROM tg_discoveries WHERE link=?", (link,))
+        if row:
+            discovery_ids.append(row["id"])
+    return {"added": added, "discovered": len(found), "deduplicated": duplicated, "evaluated": len(infos),
+            "queued": auto_queue_discoveries(icp_id) if auto_queue else 0, "discovery_ids": discovery_ids}
 
 
 def discoveries(status=None):
@@ -274,7 +300,16 @@ def discoveries(status=None):
     if status:
         sql += " WHERE status=?"
         args.append(status)
-    return db.query(sql + " ORDER BY status='suggested' DESC, score DESC LIMIT 300", args)
+    rows = db.query(sql + " ORDER BY status='suggested' DESC, score DESC LIMIT 300", args)
+    for row in rows:
+        metadata = db.loads(row["reason"], {})
+        if isinstance(metadata, dict) and ("agent_signal" in metadata or "source_signal" in metadata):
+            row["agent_signal"] = metadata.get("agent_signal", {"status": "unverified", "evidence": []})
+            row["source_signal"] = metadata.get("source_signal", {"status": "unverified", "kind": "industry_source", "evidence": []})
+            row["parent_url"] = metadata.get("parent_url", "")
+            row["link_text"] = metadata.get("link_text", "")
+            row["reason"] = metadata.get("model_reason", metadata.get("link_text", ""))
+    return rows
 
 
 @protected
@@ -312,8 +347,20 @@ def auto_queue_discoveries(icp_id=None):
     if not allowed_icp or (icp_id is not None and allowed_icp != icp_id):
         return 0
     overrides = settings.get("channel_overrides", {}) or {}
+    from ..agents import icp as icp_mod
+    special = edition.signal_mode(icp_mod.get(allowed_icp)["data"])
     ids = []
-    for d in db.query("SELECT id,link FROM tg_discoveries WHERE status='suggested' AND score>=70 AND icp_id=?", (allowed_icp,)):
+    for d in db.query("SELECT id,link,score,reason FROM tg_discoveries WHERE status='suggested' AND icp_id=?", (allowed_icp,)):
+        if special:
+            metadata = db.loads(d["reason"], {})
+            signal = metadata.get("agent_signal", {}) if isinstance(metadata, dict) else {}
+            source_signal = metadata.get("source_signal", {}) if isinstance(metadata, dict) else {}
+            agent_ok = signal.get("status") == "matched" and bool(signal.get("evidence"))
+            source_ok = source_signal.get("status") == "matched" and source_signal.get("kind") == "industry_source" and bool(source_signal.get("evidence"))
+            if not (agent_ok or source_ok):
+                continue
+        elif d["score"] < 70:
+            continue
         match = re.match(r"https?://t\.me/([A-Za-z0-9_]{4,})", d["link"] or "")
         if match and overrides.get("tg:@" + match.group(1).lower()) != "retired":
             ids.append(d["id"])

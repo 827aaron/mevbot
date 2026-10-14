@@ -12,7 +12,7 @@ import re
 import time
 import urllib.parse
 
-from .. import countries, db, llm, prompts, settings
+from .. import countries, db, edition, llm, prompts, settings, source_pool, social
 from ..errors import BudgetExceeded, UserError
 from ..sources import crawler as crawler_mod
 from ..sources import search as search_mod
@@ -20,14 +20,14 @@ from ..sources import youtube as yt
 from . import memory, schemas
 
 AGENT = "researcher"
-SKIP_HOSTS = ("facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "tiktok.com",
+SKIP_HOSTS = ("facebook.com", "instagram.com", "linkedin.com", "tiktok.com",
               "pinterest.", "wikipedia.org", "amazon.", "ebay.", "alibaba.com", "aliexpress.", "made-in-china.com",
               "youtube.com")
 
 
 def icp_brief(icp: dict, lang="en") -> str:
     return (f"Customer's product / service: {icp.get('product', '')}\n"
-            f"Target countries: {', '.join(f'{c} ({countries.name(c)})' for c in icp.get('countries', [])) or 'any (the customer did not name countries)'}\n"
+            f"Registration countries: {', '.join(f'{c} ({countries.name(c)})' for c in icp.get('countries', [])) or 'any (the customer did not name countries)'}\n"
             f"Target customer types: {', '.join(icp.get('customer_types', []))}\n"
             f"Industries: {', '.join(icp.get('industries', [])) or '-'}\n"
             f"Company size: {icp.get('company_size') or '-'}\n"
@@ -36,7 +36,7 @@ def icp_brief(icp: dict, lang="en") -> str:
             f"Exclude words: {', '.join(icp.get('exclude_words', [])) or '-'}\n"
             f"Exclude (companies): {', '.join(icp.get('exclude_companies', [])) or '-'}\n"
             f"Reference customers: {', '.join(icp.get('reference_customers', [])) or '-'}\n"
-            f"Contact titles wanted: {', '.join(icp.get('contact_titles', [])) or '-'}")
+            f"Contact titles wanted: {', '.join(icp.get('contact_titles', [])) or '-'}" + edition.market_instructions(icp))
 
 
 # 提示词在提示词库：researcher.extract / researcher.web_research / researcher.youtube_task
@@ -54,8 +54,13 @@ class Researcher:
         from . import icp as icp_mod
         self.icp_mod = icp_mod
         self.words = icp_mod.lead_words(icp)
+        extra_words = source_pool.keywords_for(run.icp_id)
+        self.words["product"] = list(dict.fromkeys(self.words["product"] + extra_words))
         self.crawler = crawler_mod.Crawler(mock=self.mock, should_stop=run.should_stop)
         self.seen_urls: set[str] = set()
+        self.discovered_urls: set[str] = set()
+        self.fetch_failures = []
+        self.discovery_context = {"expanded": 0, "max_expanded": 10, "max_depth": 2, "round_roots": True}
         self.search_cfg = settings.get("search")
         self.lang = settings.get("ui_lang")
         # 岗位说明书 + 模板：同一任务内不变，放在 system 里（Claude 提示缓存）
@@ -91,6 +96,12 @@ class Researcher:
         offset += retry * 3 * qps
         qs = self.icp_mod.search_queries(self.icp, n + offset)[offset:offset + n] or \
             self.icp_mod.search_queries(self.icp, n)
+        extras = source_pool.keywords_for(self.run.icp_id)
+        if extras:
+            # User features and grounded learned expressions supplement the
+            # approved template, without overwriting any of its fields.
+            qs = [{"q": word, "country": "", "lang": ""} for word in extras[:max(1, n // 2)]] + qs
+            qs = qs[:n]
         if not qs:
             self.emit("ev.no_lead_words", level="warn")
         return qs
@@ -98,6 +109,8 @@ class Researcher:
     def page_ok(self, text: str, url: str) -> bool:
         """线索词规则（PRD §3）：网页 / 视频里至少要有一个求购词或产品词，才交给 AI 读（省钱）；排除词按每个候选判断
         （一个名录页里有很多公司，不能因为一个词丢掉整页 —— 数据师按候选的内容排除）。没设线索词时不拦。"""
+        if edition.signal_mode(self.icp) and edition.validate_b2b(self.icp, [{"url": url, "text": text}])["status"] == "matched":
+            return True
         if not (self.words["buy"] or self.words["product"]):
             return True
         w = {**self.words, "exclude": []}
@@ -108,7 +121,7 @@ class Researcher:
         return False
 
     def add_candidates(self, source: str, cands: list[dict], page_text: str | None, page_url: str,
-                       page_title: str = "", allowed_urls: set | None = None) -> int:
+                       page_title: str = "", allowed_urls: set | None = None, post_context=None) -> int:
         """把 AI 提取的候选写入线索池。page_text 不为空时，邮箱/TG 必须在原文中出现。"""
         added = 0
         low = (page_text or "").lower()
@@ -132,6 +145,18 @@ class Researcher:
                  "verified_text": page_text is not None}
             if not str(c.get("evidence_quote") or "").strip():
                 continue   # 没有依据的不收
+            if edition.served_market(self.icp):
+                quote = str(c.get("evidence_quote") or "").strip()
+                # A model quote is evidence only when it appears in the actual read text.
+                verified = page_text is not None and quote in page_text and src_url == page_url
+                c["verified_evidence"] = {"url": src_url, "quote": quote} if verified else None
+                if verified and post_context and post_context.get("author") and post_context.get("url") == page_url:
+                    # Author metadata is parsed from the actual post DOM, never
+                    # filled by the extraction model or another group member.
+                    author = str(post_context["author"]).strip()
+                    if name.lstrip("@").casefold() == author.lstrip("@").casefold():
+                        c["post"] = dict(post_context)
+                        c["verified_evidence"].update(origin="public_post", author=author)
             rid = db.execute(
                 "INSERT INTO raw_leads(task_id, source, source_url, source_title, company_name, website, country, data, "
                 "evidence, status, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -146,10 +171,41 @@ class Researcher:
         return added
 
     def extract_page(self, source: str, page: dict) -> int:
+        if self.run.icp_id:
+            source_pool.discover_page(self.run.icp_id, page, self.discovery_context)
+        original = page.get("units")
+        if original is None:
+            original = [{"url": page["url"], "text": page["markdown"], "links": page.get("links", [])}]
+        original = [u for u in original if str(u.get("text") or "").strip() and u.get("url")]
+        units = source_pool.pending_units(self.run.icp_id, page) if self.run.icp_id else original
+        changed = sum(bool(u.get("checkpoint_changed")) for u in units)
+        new, unchanged = len(units) - changed, max(0, len(original) - len(units))
+        self.run.bump(source_new_items=new, source_unchanged_items=unchanged, source_changed_items=changed)
+        source_pool.record_scan(page["url"], new, unchanged, changed)
+        added = 0
+        for unit in units:
+            if self.stop():
+                break
+            # A post/comment is evaluated independently of its neighbours.
+            item = {"url": unit["url"], "title": page.get("title", ""), "markdown": unit["text"],
+                    "emails": page.get("emails", []) if not page.get("units") else [],
+                    "links": unit.get("links", []), "access": page.get("access", "public"),
+                    "post": {"url": unit["url"], "id": unit.get("id", ""), "author": unit.get("author", ""),
+                             "platform": unit.get("platform") or page.get("platform") or "forum"}}
+            added += self._extract_unit(source, item)
+            # An extraction error propagates before this point; the content
+            # remains eligible on the next run. Raw rows are durable by now.
+            if self.run.icp_id:
+                source_pool.ack_unit(self.run.icp_id, unit)
+        return added
+
+    def _extract_unit(self, source: str, page: dict) -> int:
         if not self.page_ok(page.get("title", "") + "\n" + page["markdown"], page["url"]):
             return 0
         self.emit("ev.ai_reading", url=page["url"])
         user = (f"Page URL: {page['url']}\nPage title: {page.get('title', '')}\n\n"
+                f"Post author (read metadata): {(page.get('post') or {}).get('author', '')}\n"
+                "For a professional agent's own statement, use this actual author as the candidate name.\n"
                 f"Page content (markdown):\n{page['markdown']}")
         data, _ = llm.call_json(AGENT, "extract_leads", self.extract_system, user, schemas.CANDIDATES, task_id=self.run.id,
                                 context={"text": page["markdown"], "url": page["url"], "icp": self.icp,
@@ -159,7 +215,7 @@ class Researcher:
             self.emit("ev.page_no_leads", url=page["url"])
             return 0
         return self.add_candidates(source, cands, page["markdown"] + " " + " ".join(page.get("emails") or []),
-                                   page["url"], page.get("title", ""))
+                                   page["url"], page.get("title", ""), post_context=page.get("post"))
 
     def fetch(self, url):
         if url in self.seen_urls or not self.run.step(f"url:{url}", AGENT):
@@ -167,12 +223,42 @@ class Researcher:
         self.seen_urls.add(url)
         self.emit("ev.fetching", url=url)
         try:
-            p = self.crawler.fetch(url)
+            entry = source_pool.entry_for(url)
+            platform = social.platform_for(url)
+            if platform:
+                access = (entry or {}).get("access", "public")
+                if access == "public" and platform not in ("youtube", "x", "reddit"):
+                    # Use Scrapling for readable public pages. Dynamic/login
+                    # walls need the separate owner-authorized browser path.
+                    try:
+                        p = self.crawler.fetch(url)
+                    except crawler_mod.Skip as exc:
+                        if exc.key not in ("ev.crawl_failed",):
+                            raise
+                        p = None
+                    if not p or not edition.validate_b2b(self.icp, [{"url": url, "text": p.get("markdown", "")}]).get("evidence"):
+                        self.crawler.reserve_rendered(url)
+                        p = social.read(url, "public", self.stop)
+                else:
+                    self.crawler.reserve_rendered(url, authenticated=access == "login")
+                    p = social.read(url, access, self.stop,
+                                    int(settings.get("youtube")["max_comments_per_video"]))
+            else:
+                p = self.crawler.fetch(url)
             self.run.bump(pages=1)
+            if entry:
+                source_pool.record_read(url, "done")
             return p
+        except UserError as e:
+            self.fetch_failures.append(e)
+            source_pool.record_read(url, "failed", e.key)
+            self.emit("ev.source_failed", level="error", **{**e.params, "source": "@source.web", "error": e.key, "url": url})
+            raise
         except crawler_mod.Skip as e:
+            source_pool.record_read(url, "failed", e.key)
             if e.key in ("ev.cancelled",):
                 return None
+            self.fetch_failures.append(UserError("source_read_failed", reason=e.key, url=url))
             self.emit(e.key, level="warn", **e.params)
             if e.key in ("ev.crawl_task_limit", "ev.crawl_daily_limit"):
                 raise
@@ -191,7 +277,9 @@ class Researcher:
             if self.stop():
                 break
             try:
+                self._source_status(src, "working")
                 getattr(self, f"source_{src}")()
+                self._source_status(src, "done")
             except BudgetExceeded:
                 raise
             except crawler_mod.Skip:
@@ -201,6 +289,7 @@ class Researcher:
                              "ollama_unreachable", "key_no_permission"):
                     raise
                 self.note(src, e.key)
+                self._source_status(src, "failed", e.key)
                 self.emit("ev.source_failed", level="error", source=f"@source.{src}", error=e.key, **e.params)
         self.run.agent_state.setdefault(AGENT, {})["state"] = "done"
         self.run.emit(AGENT, "ev.researcher_done", level="success", state="done", pool=self.run.stats["pool"])
@@ -208,6 +297,21 @@ class Researcher:
     # ---- 每个来源的结果说明（任务没找够时用大白话告诉客户为什么，PRD §4）
     def note(self, src: str, why: str):
         self.run.source_notes.setdefault(src, why)      # 先记下的更具体（例如“没有网址，自动找名录也被拦住”）
+
+    def _source_status(self, source, status, error=""):
+        with self.run.stats_lock:
+            states = self.run.stats.setdefault("source_status", {})
+            states[source] = {"status": status, "error": error}
+        self.run.bump()
+
+    def _search_diagnostic(self, query, status, provider="", params=None):
+        snapshot = dict((getattr(self.crawler, "_free_search", {}) or {}).get("last", {}) or {})
+        item = {"query": query, "status": status, "provider": provider, "params": params or {}, "fallback": snapshot}
+        with self.run.stats_lock:
+            history = self.run.stats.setdefault("search_diagnostics", [])
+            history.append(item)
+            del history[:-30]
+        self.run.bump()
 
     FATAL_SEARCH = ("search_key_invalid", "search_quota")      # Key 不对 / 额度用完：后面的搜索词也一样，不再试
 
@@ -218,13 +322,19 @@ class Researcher:
             results, provider = search_mod.search(q["q"], q["country"], q["lang"], n, crawler=self.crawler,
                                                   mock_ctx=self.mock_ctx)
         except UserError as e:
+            self.search_errors.append(e)
+            self._search_diagnostic(q["q"], "failed", e.params.get("provider", ""), e.params)
+            self.emit("ev.search_query_failed", level="warn", **{**e.params, "query": q["q"], "error": f"@errors.{e.key}"})
             if e.key in self.FATAL_SEARCH:
                 raise
-            self.search_errors.append(e)
-            self.emit("ev.search_query_failed", level="warn", query=q["q"], error=f"@errors.{e.key}")
             if not self.mock:
                 self.pause_jitter(3, 8)              # 被拦后隔一会儿再搜下一个词
             return None
+        self._search_diagnostic(q["q"], "done", provider)
+        urls = {r.get("url") for r in results if r.get("url")}
+        new = urls - self.discovered_urls
+        self.discovered_urls.update(urls)
+        self.run.bump(search_results=len(results), discovered=len(new))
         self.emit("ev.search_results", count=len(results), provider=f"@search.{provider}")
         return results
 
@@ -248,6 +358,8 @@ class Researcher:
         self.run.bump(queries=len(queries))
         self.search_errors = []
         tried = ok = 0
+        initial_failure = len(self.fetch_failures)
+        pages_read = 0
         for q in queries:
             if self.stop():
                 return
@@ -267,10 +379,16 @@ class Researcher:
                     return
                 if self.skip_url(r["url"]) and not self.mock:
                     continue
-                page = self.fetch(r["url"])
+                try:
+                    page = self.fetch(r["url"])
+                except UserError:
+                    continue  # An unavailable platform must not hide other results.
                 if page:
+                    pages_read += 1
                     self.extract_page("google", page)
         self.all_failed(tried, ok)
+        if not pages_read and len(self.fetch_failures) > initial_failure and not self.stop():
+            raise self.fetch_failures[initial_failure]
 
     def claude_search(self, q: dict):
         self.emit("ev.claude_searching", query=q["q"], country=q["country"])
@@ -293,7 +411,8 @@ class Researcher:
 
     # ---- 网页爬虫
     def source_web(self):
-        urls = list(self.run.params.get("urls") or [])
+        urls = list(dict.fromkeys(list(self.run.params.get("urls") or []) +
+                                 (source_pool.urls() if source_pool.config()["icp_id"] == self.run.icp_id else [])))
         if not urls:
             self.emit("ev.no_urls_search_directories")
             n = max(2, int(self.search_cfg["queries_per_source"]) // 2)
@@ -319,14 +438,24 @@ class Researcher:
                 raise self.search_errors[-1]
         follow = self.run.params.get("follow_links", True)
         per_site = int(settings.get("crawler")["max_pages_per_site"])
+        first_failure = len(self.fetch_failures)
+        failures = []
+        read_count = 0
         for url in urls:
             if self.stop():
                 return
             url = crawler_mod.normalize_url(url)
-            page = self.fetch(url)
+            try:
+                page = self.fetch(url)
+            except UserError as exc:
+                failures.append(exc)
+                continue
             if not page:
                 continue
+            read_count += 1
             self.extract_page("web", page)
+            if social.platform_for(page["url"]):
+                continue  # Never follow registration or account/action links.
             if follow and not self.mock:
                 # 名录分页 / 列表子页：只跟进同站点、看起来像列表或分页的链接
                 host = urllib.parse.urlparse(page["url"]).netloc
@@ -340,14 +469,48 @@ class Researcher:
                 for sub in list(dict.fromkeys(subs))[:max(0, per_site - 1)]:
                     if self.stop():
                         return
-                    p2 = self.fetch(sub)
+                    try:
+                        p2 = self.fetch(sub)
+                    except UserError as exc:
+                        failures.append(exc)
+                        continue
                     if p2:
                         self.extract_page("web", p2)
+        if failures and not read_count:
+            raise failures[0]
+        if not read_count and len(self.fetch_failures) > first_failure and not self.stop():
+            raise self.fetch_failures[first_failure]
 
     # ---- YouTube
+    def youtube_crawler(self):
+        """Public rendered comments need no key or login; use a session only by choice."""
+        urls = list(dict.fromkeys(source_pool.urls("youtube") +
+                [u for u in self.run.params.get("urls", []) if social.platform_for(u) == "youtube"]))
+        self.search_errors = []
+        if not urls:
+            for query in self.plan_queries("youtube", 2):
+                results = self.run_search({**query, "q": "site:youtube.com/watch " + query["q"]}, 5)
+                if results:
+                    urls.extend(r["url"] for r in results if social.platform_for(r["url"]) == "youtube")
+            if not urls and self.search_errors:
+                raise self.search_errors[-1]
+        errors, read = [], 0
+        for url in list(dict.fromkeys(urls))[:int(settings.get("youtube")["max_videos_per_query"])]:
+            if self.stop():
+                return
+            try:
+                page = self.fetch(url)
+                if page:
+                    read += 1
+                    self.extract_page("youtube", page)
+            except UserError as exc:
+                errors.append(exc)
+        if errors and not read:
+            raise errors[0]
+
     def source_youtube(self):
         if not self.mock and not settings.get_secret("youtube_api_key"):
-            raise UserError("youtube_key_missing")
+            return self.youtube_crawler()
         n = max(2, int(self.search_cfg["queries_per_source"]) // 2)
         self.emit("ev.planning_queries", source="@source.youtube")
         queries = self.plan_queries("youtube", n)

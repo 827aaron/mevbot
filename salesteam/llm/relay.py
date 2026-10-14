@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from .. import alerts, settings
+from .. import alerts, settings, tls
 from ..errors import UserError
 from .base import AgentConfig, LLMRequest, LLMResponse
 
@@ -111,7 +111,7 @@ def _http(url, key, kind="openai", timeout=20):
         headers["Authorization"] = f"Bearer {key}"
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=tls.context()) as r:
             return r.status, json.load(r)
     except urllib.error.HTTPError as e:
         body = ""
@@ -157,7 +157,7 @@ def _post(url, key, kind, payload, timeout=40):
         headers["Authorization"] = f"Bearer {key}"
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=tls.context()) as r:
             return r.status, ""
     except urllib.error.HTTPError as e:
         try:

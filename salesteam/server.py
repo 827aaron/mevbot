@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import APP_NAME, VERSION, background, countries, db, leads, llm, paths, settings, tasks, vault
+from . import APP_NAME, APP_TAGLINE, VERSION, background, countries, db, edition, leads, llm, paths, settings, tasks, vault
 from .agents import icp as icp_mod
 from .agents import learning
 from .agents.registry import AGENT_KEYS, active_agents, active_keys
@@ -74,6 +74,8 @@ def ui_lang():
 def meta():
     return {
         "version": VERSION,
+        "app": {"name": APP_NAME, "tagline": APP_TAGLINE},
+        "edition": edition.current(),
         "ui_lang": ui_lang(),
         "agents": active_agents(),          # v1：不含销售员 / 跟进员（FEATURES["outreach"]）
         "providers": providers.public_catalog(),
@@ -110,6 +112,26 @@ def set_ui(data: dict = Depends(body)):
         raise UserError("invalid_value", field="lang")
     settings.put("ui_lang", lang)
     return {"ui_lang": lang}
+
+
+@app.get("/api/diagnostics/export")
+def export_diagnostics():
+    from . import diagnostics
+    filename, content = diagnostics.build()
+    return Response(content, media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store",
+    })
+
+
+@app.get("/api/edition")
+def get_edition():
+    return {**edition.current(), "presets": edition.presets()}
+
+
+@app.post("/api/edition/presets")
+def apply_edition_presets(data: dict = Depends(body)):
+    return {"templates": edition.apply_presets(keys=data.get("keys"), confirmed=data.get("confirmed", False),
+                                                product=data.get("product"))}
 
 
 # ------------------------------------------------------------------ 智能体模型设置 / 用量
@@ -637,7 +659,8 @@ def delete_all(data: dict = Depends(body)):
         with db.transaction():
             for t in tables:
                 db.execute(f"DELETE FROM {t}")
-            for key in ("manager_goal", "scout_settings", "channel_overrides"):
+            for key in ("manager_goal", "scout_settings", "scout_collection_state", "channel_overrides",
+                        "source_pool_settings", "source_pool_entries", "source_pool_report", "source_pool_checkpoints"):
                 db.execute("DELETE FROM settings WHERE key=?", (key,))
             if scope == "everything":
                 llm.init_defaults()
@@ -653,6 +676,9 @@ def delete_all(data: dict = Depends(body)):
         upkeep._next_quick.clear()
         upkeep._busy[0] = False
         scout._active_days.clear()
+        if scope == "everything":
+            from . import social
+            social._sessions.clear()
         try:
             db.execute("VACUUM")
         except Exception:  # Compaction is optional; the deletion already committed.

@@ -9,10 +9,11 @@
 C 进线索库备用（不计数）；D 丢弃（只留在线索池记录原因，不进线索库）。
 """
 import json
+import re
 import urllib.parse
 
 from .. import contacts as contacts_mod
-from .. import countries, db, leadpool, leads, llm, prompts, quality, settings
+from .. import countries, db, edition, leadpool, leads, llm, prompts, quality, settings
 from ..llm import decision
 from ..sources import crawler as crawler_mod
 from . import learning, memory, schemas
@@ -79,7 +80,7 @@ class Analyst:
             if (exd and domain and exd == domain) or leads.company_key(exl) == leads.company_key(cand["company_name"]):
                 return "excluded_company"
         c = cand.get("country") or ""
-        if c and self.icp.get("countries") and c not in self.icp["countries"]:
+        if not edition.served_market(self.icp) and c and self.icp.get("countries") and c not in self.icp["countries"]:
             return "wrong_country"
         return ""
 
@@ -131,7 +132,7 @@ class Analyst:
 
         # 2.5 判断模型预筛（PRD 2.3，可选）：只在“很有把握不符合”时筛掉，省掉读官网和大模型打分的费用；
         #     拿不准（最高概率 < 阈值）或判断为符合 → 交给大模型。判断模型不能单独让线索合格。
-        if decision.enabled():
+        if decision.enabled() and not edition.signal_mode(self.icp):
             q, opts = prompts.options("decision.lead_match")
             d = decision.decide(self._material(raw, cand, [])[:12000], opts, q + "\n" + icp_brief(self.icp),
                                 agent=AGENT, task_id=self.run.id, context=self._mock_hint(cand))
@@ -179,9 +180,16 @@ class Analyst:
         phones = [c.get("whatsapp") for c in contacts if c.get("whatsapp")] + \
             [ph for p in pages for ph in (p.get("phones") or [])] + list(cand.get("phones") or [])
         inferred, strength = countries.infer_country(material + " " + site_text, domain, phones)
-        if inferred and (not country or strength == "strong"):
+        if not edition.served_market(self.icp) and inferred and (not country or strength == "strong"):
             country = inferred
-        cok = countries.country_ok(country, self.icp)
+        validation = None
+        if edition.served_market(self.icp):
+            validation = self._market_validation(self.icp, raw, cand, pages, country)
+            cok = {"matched": True, "mismatch": False, "unverified": None}[validation["market_validation"]["status"]]
+            b2b = validation["b2b_validation"]["status"]
+            hm["customer_type_ok"] = b2b == "matched"
+        else:
+            cok = countries.country_ok(country, self.icp)
         if cok is False:
             hm["country_ok"] = False
         else:
@@ -193,9 +201,16 @@ class Analyst:
         sources = []
         for s in data.get("sources") or []:
             u = str(s.get("url") or "")
+            if edition.served_market(self.icp):
+                docs = self._source_documents(raw, cand, pages)
+                quote = str(s.get("quote") or "")
+                if not quote or not any(d["url"] == u and quote in d["text"] for d in docs):
+                    continue
             if u in allowed and all(x["url"] != u for x in sources):
                 sources.append({"url": u, "title": s.get("title", ""), "quote": str(s.get("quote") or "")[:300]})
         for s in src:
+            if edition.served_market(self.icp) and not any(d["url"] == s["url"] and s["quote"] in d["text"] for d in self._source_documents(raw, cand, pages)):
+                continue
             if all(x["url"] != s["url"] for x in sources):
                 sources.insert(0, s)
 
@@ -243,20 +258,35 @@ class Analyst:
         profile = dict(data.get("profile") or {})
         profile["grade_reason"] = data.get("grade_reason", "")
         profile["hard_match"] = hm
+        signal_accepted = bool(edition.signal_mode(self.icp) and validation
+                               and validation["b2b_validation"]["status"] == "matched")
+        if signal_accepted:
+            validation["b2b_validation"]["status"] = "suspected"
+        if validation:
+            profile.update(validation)
+            for evidence in validation["market_validation"]["evidence"] + validation["b2b_validation"]["evidence"]:
+                if not any(x["url"] == evidence["url"] and x["quote"] == evidence["quote"] for x in sources):
+                    sources.append({"url": evidence["url"], "title": "Verified business / served-market evidence", "quote": evidence["quote"]})
 
         # 5. 判定（国家明确不在目标内才丢弃；国家不明的按“不完全符合硬性条件”进备用）
-        country_wrong = cok is False
-        if grade == "D" or country_wrong or hm.get("excluded"):
-            reason = "grade_d" if grade == "D" else ("wrong_country" if country_wrong else "excluded")
+        country_wrong = cok is False and not signal_accepted
+        b2b_wrong = validation and (validation["b2b_validation"]["status"] == "mismatch" or
+                                    edition.signal_mode(self.icp) and validation["b2b_validation"]["status"] == "unverified")
+        if ((grade == "D" or hm.get("excluded")) and not signal_accepted) or country_wrong or b2b_wrong:
+            reason = ("b2b_unverified" if validation["b2b_validation"]["status"] == "unverified" else "b2b_mismatch") if b2b_wrong else "market_mismatch" if country_wrong and validation else "grade_d" if grade == "D" else ("wrong_country" if country_wrong else "excluded")
             db.execute("UPDATE raw_leads SET data=? WHERE id=?",
-                       (db.dumps({**cand, "analysis": {"grade": grade, "reason": data.get("grade_reason", "")}}), rid))
+                       (db.dumps({**cand, "analysis": {"grade": grade, "reason": data.get("grade_reason", ""), "validation": validation}}), rid))
             self._finish_raw(rid, "discarded", reason)
             self.run.bump(processed=1, discarded=1)
             self.emit("ev.discarded", name=name, grade=grade, reason=data.get("grade_reason", "")[:200])
             return
 
         nq = ""
-        if grade not in self.qualified_grades:
+        if validation and validation["market_validation"]["status"] == "unverified":
+            nq = "market_unverified"
+        elif validation and validation["b2b_validation"]["status"] == "unverified":
+            nq = "b2b_unverified"
+        elif grade not in self.qualified_grades:
             nq = "grade"
         elif not hard_ok:
             nq = "hard_conditions"
@@ -266,9 +296,11 @@ class Analyst:
             nq = "no_tg_wa"
         elif not sources:
             nq = "no_source"
-        qualified = not nq
+        qualified = signal_accepted or not nq
+        if signal_accepted:
+            nq = ""
         # v1 没有人工审核：按比例抽查数据师的判断（裁判模型），不同意或拿不准 → 备用池（PRD §1）
-        if qualified and not leads.review_on() and quality.should_check():
+        if qualified and not signal_accepted and not leads.review_on() and quality.should_check():
             j = quality.judge({"company_name": name, "grade": grade, "score": data.get("score")},
                               icp_brief(self.icp) + "\n\nGrading criteria:\n" + self.criteria, material,
                               task_id=self.run.id)
@@ -364,6 +396,56 @@ class Analyst:
         return pages
 
     @staticmethod
+    def _source_documents(raw, cand, pages):
+        # A directory may describe several companies. Bind each quote to this
+        # candidate, or to its own fetched website; never use another entry.
+        documents = []
+        name = str(cand.get("company_name") or raw.get("company_name") or "").strip()
+        own_domain = leads.domain_of(cand.get("website", ""))
+        for p in pages:
+            if own_domain and leads.domain_of(p["url"]) == own_domain:
+                documents.append({"url": p["url"], "text": p.get("markdown", "")})
+        verified = cand.get("verified_evidence") or {}
+        quote = str(cand.get("evidence_quote") or raw.get("evidence") or "")
+        excerpt = str(cand.get("page_excerpt") or "") if cand.get("verified_text") else ""
+        quote_verified = (verified.get("url") == raw["source_url"] and verified.get("quote") == quote) or (quote and quote in excerpt)
+        # Exact candidate quotation must identify the candidate. Anonymous group
+        # context or a named neighbouring company cannot qualify it.
+        entity_pattern = re.escape(name) if re.search(r"[\u3400-\u9fff]", name) else r"(?<!\w)" + re.escape(name) + r"(?!\w)"
+        bound = bool(name and len(name) >= 2 and re.search(entity_pattern, quote, re.I))
+        source_path = urllib.parse.urlparse(raw["source_url"])
+        handle = str(cand.get("telegram", [""])[0] or "").lstrip("@") if cand.get("telegram") else ""
+        author_bound = bool(handle and source_path.hostname in ("t.me", "telegram.me")
+                            and source_path.path.strip("/").split("/")[0].lower() == handle.lower())
+        tg = cand.get("tg") or {}
+        message_bound = bool(raw.get("source") == "tg" and verified.get("origin") == "tg_message"
+                             and verified.get("author") in (str(tg.get("username") or ""), str(tg.get("sender_id") or ""))
+                             and verified.get("author") and str(tg.get("msg_id")) == source_path.path.rstrip("/").split("/")[-1])
+        post = cand.get("post") or {}
+        post_author = str(post.get("author") or "")
+        post_bound = bool(verified.get("origin") == "public_post" and post_author
+                          and verified.get("author") == post_author and post.get("url") == raw["source_url"]
+                          and name.lstrip("@").casefold() == post_author.lstrip("@").casefold())
+        author_bound = author_bound or message_bound or post_bound
+        if quote_verified and (bound or author_bound):
+            # A multi-entry quotation still must not transfer the neighbouring
+            # company's market assertion to this entity.
+            entity_sentences = [sentence for sentence in edition._sentences(quote)
+                                if author_bound or re.search(entity_pattern, sentence, re.I)]
+            if entity_sentences:
+                documents.append({"url": raw["source_url"], "text": "\n".join(entity_sentences)})
+        if own_domain and leads.domain_of(raw["source_url"]) == own_domain and excerpt:
+            documents.append({"url": raw["source_url"], "text": excerpt})
+        return documents
+
+    @staticmethod
+    def _market_validation(icp, raw, cand, pages, country):
+        documents = Analyst._source_documents(raw, cand, pages)
+        return {"geo_mode": "served_market", "target_markets": icp.get("target_markets") or [],
+                "market_validation": edition.validate_market(icp, documents, country),
+                "b2b_validation": edition.validate_b2b(icp, documents)}
+
+    @staticmethod
     def _material(raw, cand, pages) -> str:
         c = {k: cand.get(k) for k in ("company_name", "website", "country", "customer_type", "industry", "emails",
                                       "telegram", "people", "description", "buying_signal")}
@@ -425,7 +507,24 @@ class Passthrough:
             country = countries.normalize_country(cand.get("country", "")) or countries.infer_country(
                 " ".join([cand.get("description", ""), raw["evidence"] or ""]), domain,
                 [c.get("whatsapp") for c in contacts if c.get("whatsapp")])[0]
-            hard = bool(src) and contacts_mod.qualifying(contacts) and countries.country_ok(country, self.icp) is True
+            validation = Analyst._market_validation(self.icp, raw, cand, [], country) if edition.served_market(self.icp) else None
+            signal_accepted = bool(edition.signal_mode(self.icp) and validation
+                                   and validation["b2b_validation"]["status"] == "matched")
+            b2b_wrong = validation and (validation["b2b_validation"]["status"] == "mismatch" or
+                                        edition.signal_mode(self.icp) and validation["b2b_validation"]["status"] == "unverified")
+            if validation and (b2b_wrong or validation["market_validation"]["status"] == "mismatch" and not signal_accepted):
+                db.execute("UPDATE raw_leads SET status='filtered',reason=?,data=?,processed_at=? WHERE id=?",
+                           (("b2b_unverified" if validation["b2b_validation"]["status"] == "unverified" else "b2b_mismatch") if b2b_wrong else "market_mismatch",
+                            db.dumps({**cand, "validation": validation}), db.now(), rid))
+                self.run.bump(processed=1, filtered=1)
+                return
+            geo_ok = (validation["market_validation"]["status"] == "matched" and validation["b2b_validation"]["status"] == "matched") if validation else countries.country_ok(country, self.icp) is True
+            if validation:
+                src = [{"url": e["url"], "title": "Verified business / served-market evidence", "quote": e["quote"]} for e in
+                       validation["market_validation"]["evidence"] + validation["b2b_validation"]["evidence"]]
+            if signal_accepted:
+                validation["b2b_validation"]["status"] = "suspected"
+            hard = signal_accepted or bool(src) and contacts_mod.qualifying(contacts) and geo_ok
             if leads.review_on():
                 status, qual, nq = "pending_review", False, "analyst_off"
             else:
@@ -435,7 +534,7 @@ class Passthrough:
                 "country": country,
                 "customer_type": cand.get("customer_type", ""), "industry": cand.get("industry", ""), "grade": "-",
                 "score": 0, "qualified": qual, "status": status, "not_qualified_reason": nq,
-                "profile": {"summary": cand.get("description", ""), "grade_reason": ""}, "contacts": contacts,
+                "profile": {"summary": cand.get("description", ""), "grade_reason": "", **(validation or {})}, "contacts": contacts,
                 "sources": src, "first_source": raw["source"], "icp_id": self.icp_id, "task_id": self.run.id,
                 "message_type": cand.get("message_type", ""), "intent": cand.get("intent", ""),
                 "found_by_account": cand.get("found_by_account"), "posted_at": cand.get("posted_at"),

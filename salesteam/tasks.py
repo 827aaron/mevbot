@@ -63,7 +63,9 @@ class TaskRun:
         self.seq = 0
         self.stats = {"pool": 0, "processed": 0, "qualified": 0, "backup": 0, "discarded": 0, "duplicate": 0,
                       "filtered": 0, "errors": 0, "pages": 0, "queries": 0, "messages": 0, "chats": 0,
-                      "keyword_hits": 0, "prescreened": 0}
+                      "keyword_hits": 0, "prescreened": 0, "search_results": 0, "discovered": 0,
+                      "source_status": {}, "search_diagnostics": [], "source_new_items": 0,
+                      "source_unchanged_items": 0, "source_changed_items": 0}
         self.agent_state: dict[str, dict] = {}
         self.source_notes: dict[str, str] = {}     # 每个来源为什么没出结果（google: search_blocked …），任务结束时写进 stats
         self.done = False
@@ -124,7 +126,7 @@ class TaskRun:
         db.execute("UPDATE tasks SET stats=? WHERE id=?", (db.dumps(snap), self.id))
         with self.cond:
             self.cond.notify_all()
-        if snap["qualified"] >= self.target > 0:
+        if snap["qualified"] >= self.target > 0 and not self.params.get("continuous_monitor"):
             self.target_reached.set()
         return snap
 
@@ -198,6 +200,19 @@ def _create_task(params: dict, created_by, parent_id, goal_date, kind, schedule_
         raise UserError("ai_paused")
     if kind == "research":
         clean = validate_research(params)
+        # Only internal daily source monitoring can run through the day without
+        # a lead quota. HTTP/user research still follows its requested target.
+        if created_by == "scout" and params.get("continuous_monitor") is True:
+            from . import edition
+            if edition.current()["id"] == "my_igaming" and clean["sources"] == ["tg"]:
+                clean["continuous_monitor"] = True
+                if parent_id and params.get("resume_from") == parent_id:
+                    previous = db.query_one("SELECT created_by FROM tasks WHERE id=?", (parent_id,))
+                    if previous and previous["created_by"] == "scout":
+                        clean["resume_from"] = parent_id
+        if created_by == "source_pool":
+            # A bounded source-reading round has no customer lead quota.
+            clean["target"] = 0
         if created_by != "manager":
             clean.pop("manager_query_offset", None)
         icp_id, target = clean["icp_id"], clean["target"]
@@ -543,6 +558,11 @@ def _execute_pipeline(run: TaskRun):
             status, result = "cancelled", "cancelled"
         elif config_err and s["qualified"] == 0 and s["processed"] == 0:
             status, result, error = "failed", "error", config_err.key
+        elif not s.get("pool") and srcs and all(
+                s.get("source_status", {}).get(src, {}).get("status") == "failed" for src in srcs):
+            status, result = "failed", "error"
+            error = next((s["source_status"][src].get("error") for src in srcs
+                          if s["source_status"][src].get("error")), "search_failed")
         else:
             # 一个候选都没拿到 → “没搜到任何结果”（不是“数据源已用完”），并按来源说明原因（PRD §4）
             result = "no_results" if not s.get("pool") else "sources_exhausted"

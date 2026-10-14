@@ -7,6 +7,7 @@
 import anthropic
 
 from ..errors import UserError
+from .. import tls
 from . import providers
 from .base import AgentConfig, LLMRequest, LLMResponse
 
@@ -18,7 +19,8 @@ def _client(cfg: AgentConfig) -> anthropic.Anthropic:
     if not cfg.api_key:
         raise UserError("key_missing", agent=f"@agent.{cfg.agent}")
     kw = {"base_url": cfg.base_url} if cfg.base_url else {}   # Anthropic 兼容的中转站
-    return anthropic.Anthropic(api_key=cfg.api_key, max_retries=2, timeout=900, **kw)
+    return anthropic.Anthropic(api_key=cfg.api_key, max_retries=2, timeout=900,
+                              http_client=anthropic.DefaultHttpxClient(verify=tls.context()), **kw)
 
 
 def _said(e) -> str:

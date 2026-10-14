@@ -21,6 +21,39 @@ from .. import settings
 from ..errors import UserError
 from . import mockweb
 
+
+def forum_units(resp, url):
+    """Keep forum posts and their authors separate, excluding quoted replies."""
+    if not hasattr(resp, "css"):
+        return []
+    nodes = resp.css('article.message, .post[id], [itemtype*="DiscussionForumPosting"], [data-post-id]')
+    units, seen = [], set()
+    for node in nodes[:100]:
+        attrs = node.attrib
+        ident = attrs.get("data-post-id") or attrs.get("id")
+        if not ident or ident in seen:
+            continue
+        seen.add(ident)
+        body = node.css('.message-body, .post-body, .post-content, [itemprop="text"]')
+        body = body[0] if body else node
+        # Quoted statements belong to the quoted author, not this post's author.
+        raw = str(body.html_content)
+        raw = re.sub(r"<blockquote\b[^>]*>.*?</blockquote>", "", raw, flags=re.I | re.S)
+        from scrapling.parser import Selector
+        clean = Selector(raw)
+        text = str(clean.get_all_text(separator="\n", strip=True)).strip()
+        if not text:
+            continue
+        author = node.css('.username, .author, [itemprop="author"]')
+        author = str(author[0].get_all_text(separator=" ", strip=True)).strip() if author else ""
+        links = [{"url": urllib.parse.urljoin(url, a.attrib.get("href", "")),
+                  "text": str(a.get_all_text(separator=" ", strip=True))}
+                 for a in clean.css('a[href]') if a.attrib.get("href", "").startswith(("/", "http"))]
+        permalink = url.split("#")[0] + "#" + ident
+        units.append({"id": ident, "url": permalink, "author": author,
+                      "text": ("Author: " + author + "\n" if author else "") + text[:6000], "links": links})
+    return units
+
 # 不自己写 User-Agent（0.2.2 文档审查）：自定义的旧版 Chrome UA 和 curl_cffi 模拟的新版浏览器指纹对不上，反而更容易触发验证
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _BAD_EMAIL_END = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".css", ".js")
@@ -227,6 +260,29 @@ class Crawler:
         return p.can_fetch(url, "*"), float(delay or 0)
 
     # -------------------------------------------------------- 抓取
+    def reserve_rendered(self, url: str, authenticated=False):
+        """Reserve a browser read under the same stop, page and pacing limits.
+
+        Public crawling follows robots. An owner's explicitly configured
+        logged-in source is an authorized session read, not public indexing.
+        """
+        if self.should_stop():
+            raise Skip("ev.cancelled")
+        if self.pages >= self.max_pages:
+            raise Skip("ev.crawl_task_limit", limit=self.max_pages)
+        if not self.mock:
+            host = urllib.parse.urlparse(url).netloc.lower()
+            if not authenticated:
+                ok, delay = self._robots_ok(url)
+                if not ok:
+                    raise Skip("ev.robots_blocked", url=url)
+            else:
+                delay = 0
+            if self.count_daily:
+                self._count_daily()
+            self._wait_turn(host, max(float(self.cfg["delay_seconds"]), delay))
+        self.pages += 1
+
     def fetch(self, url: str) -> dict:
         url = normalize_url(url)
         if not url:
@@ -354,6 +410,9 @@ class Crawler:
         out = {"url": str(resp.url or url), "title": title, "markdown": md[:MAX_MD_CHARS],
                "truncated": len(md) > MAX_MD_CHARS, "links": links, "emails": emails,
                "whatsapp": msg["whatsapp"], "phones": msg["phones"], "telegram_links": msg["telegram"]}
+        units = forum_units(resp, out["url"])
+        if units:
+            out["units"] = units
         if self.keep_raw:
             out["raw"] = raw[:400000]
         return out

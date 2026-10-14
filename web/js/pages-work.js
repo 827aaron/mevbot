@@ -4,6 +4,7 @@
   'use strict';
   const S = window.STATE, U = window.UI, A = window.ACTIONS, P = window.PAGES;
   const { esc, avatar, grade, sw, empty, money, api, toast, toastErr, busy } = U;
+  const agentEdition = () => S.meta.edition && S.meta.edition.id === 'my_igaming';
 
   /* =================================================================
      小组件：标签输入 / 国家选择（先选大区，再勾国家）
@@ -77,7 +78,7 @@
     if (c.tg) parts.push('<span class="ct ct-tg">' + icon('telegram') + esc(c.tg) + '</span>');
     if (c.wa) parts.push('<span class="ct ct-wa">' + icon('whatsapp') + esc(c.wa) + '</span>');
     if (!c.wa && c.waMaybe) parts.push('<span class="ct ct-wa" title="' + esc(t('wa.maybe')) + '">' + icon('whatsapp') + esc(c.waMaybe) + ' <span class="tag tag-warning">' + t('wa.maybe') + '</span></span>');
-    if (!c.tg && !c.wa) parts.push('<span class="tag tag-warning">' + icon('alert') + t('leads.noTgWa') + '</span>');
+    if (!c.tg && !c.wa) parts.push(agentEdition() ? '<span class="xs muted">' + t('edition.contactsPending') + '</span>' : '<span class="tag tag-warning">' + icon('alert') + t('leads.noTgWa') + '</span>');
     if (withEmail && c.email) parts.push('<span class="ct ct-mail">' + icon('mail') + esc(c.email) + '</span>');
     return '<span class="row wrap" style="gap:4px 12px">' + parts.join('') + '</span>';
   }
@@ -250,7 +251,7 @@
      下面一行是现在开了监控的群数（0 个时用警告色，仍可开始）。FB 群第 4 步上线前不能选 */
   function srcRow(s, on, tgN) {
     // U15：没有 YouTube Key 时 YouTube 不能勾（旁边写去哪里填）；U16：Google 用免费搜索时提示一行
-    const ytOff = s === 'youtube' && S.srcKeys && !S.srcKeys.youtube;
+    const ytOff = false; // Public YouTube crawling works without an API key or login.
     const desc = s === 'tg'
       ? '<div class="xs" id="t-tg-line" style="' + (tgN ? 'color:var(--color-text-3)' : 'color:var(--color-warning)') + '">' + t('tasks3.tgLine', { n: tgN }) + ' <a href="#/channels/joined" data-action="go" data-route="channels/joined">' + t('tasks3.tgGo') + '</a></div>'
       : ytOff ? '<div class="xs" style="color:var(--color-warning)">' + t('tasks4.ytNoKey') + '</div>'
@@ -264,9 +265,10 @@
     return '<div class="card"><div class="card-header"><h3>' + icon('play') + t('tasks.new') + '</h3><span class="sub">' + t('tasks.sub') + '</span></div><div class="card-body">' +
       (icps.length ? '<div class="field"><label class="label">' + t('tasks.template') + ' <span class="req">*</span></label><select class="select" id="t-icp">' + icps.map((i) => '<option value="' + i.id + '">' + esc(i.name) + '</option>').join('') + '</select></div>'
         : '<div class="alert alert-info">' + icon('target') + '<span>' + t('tasks.no_template') + '</span></div>') +
+      (S.meta.edition && S.meta.edition.id === 'my_igaming' ? '<p class="hint" style="margin-bottom:12px">' + t('edition.searchHint') + '</p>' : '') +
       '<div class="field"><label class="label">' + t('tasks.sources') + ' <span class="req">*</span></label><div class="col">' +
       S.meta.sources.map((s) => srcRow(s, last.includes(s), tgN)).join('') +
-      '<label class="checkbox" style="opacity:.6;cursor:not-allowed"><input type="checkbox" disabled><span><b class="small">' + t('source.fb') + '</b> <span class="tag">' + t('tasks3.soon') + '</span><div class="xs muted">' + t('tasks3.fbSoon') + '</div></span></label>' + '</div></div>' +
+      '<p class="hint">' + t('spool.taskHint') + '</p></div></div>' +
       '<div class="field" id="urls-wrap"><label class="label">' + t('tasks.urls') + '</label><textarea class="textarea mono" id="t-urls" placeholder="https://www.example-directory.com/members">' + esc(urls) + '</textarea><span class="hint">' + t('tasks.urls_hint') + '</span></div>' +
       '<div class="field"><label class="label">' + t('tasks.target') + ' <span class="req">*</span></label><input class="input num" type="number" id="t-target" min="1" max="500" value="' + esc(target) + '" style="width:140px"><span class="hint" id="t-target-hint">' + t('tasks.target_hint') + '</span></div>' +
       whenField() + '</div>' +
@@ -421,6 +423,15 @@
     });
     return (task.result === 'sources_exhausted' ? ' ' + t('board.shortfall2') : '') + (lines.length ? '<ul style="margin:6px 0 0;padding-left:18px">' + lines.join('') + '</ul>' : '');
   }
+  function failedSources(stats) {
+    const rows = Object.entries(stats.source_status || {}).filter(([, state]) => state.status === 'failed');
+    if (!rows.length) return '';
+    return '<div class="alert alert-warning" style="margin-top:12px"><div><b>' + t('run.failedSources') + '</b><ul class="small" style="margin:6px 0 0;padding-left:18px">' + rows.map(([source, state]) => {
+      const name = t('source.' + source);
+      const detail = state.error && U.has('errors.' + state.error) ? t('errors.' + state.error, Object.assign({ provider: name, detail: '', agent: '', fields: '' }, state.params || {})) : t('run.sourceFailed');
+      return '<li><b>' + esc(name) + '</b>: ' + detail + '</li>';
+    }).join('') + '</ul></div></div>';
+  }
   async function liveBoard(el, taskId) {
     let task = await api('GET', '/api/tasks/' + taskId);
     const agents = Object.assign({}, task.agents || {});
@@ -448,8 +459,8 @@
         ['manager', 'researcher', 'monitor', 'analyst'].map((k) => '<button class="' + (filter === k ? 'active' : '') + '" data-f="' + k + '" title="' + esc(t('agent.' + k)) + '"><span data-agent="' + k + '" style="color:var(--agent);display:inline-flex">' + icon('a_' + k) + '</span></button>').join('') + '</div></div></div>' +
         '<div class="feed" id="feed" style="max-height:560px;overflow:auto"></div></div>' +
         '<div class="grid" style="align-self:start"><div class="card"><div class="card-header"><h3>' + icon('filter') + t('run.funnel') + '</h3></div><div class="card-body"><div class="funnel">' +
-        [['found', stats.pool || 0, 'researcher'], ['screened', stats.processed || 0, 'analyst'], ['graded', (stats.qualified || 0) + (stats.backup || 0), 'analyst'], ['qualified', q, 'manager']].map((r) => '<div class="funnel-row" data-agent="' + r[2] + '"><span class="text-2">' + t('run.f.' + r[0]) + '</span><div class="bar"><span style="width:' + (r[1] / Math.max(1, stats.pool || 1) * 100) + '%"></span></div><b class="num" style="text-align:right">' + r[1] + '</b></div>').join('') +
-        '</div><div class="kv xs" style="margin-top:12px">' + [['filtered', (stats.filtered || 0) + (stats.discarded || 0)], ['duplicate', stats.duplicate], ['pages', stats.pages], ['queries', stats.queries]].map(([k, v]) => '<span class="k">' + t('kpi.' + k) + '</span><span class="num">' + U.fmtNum(v) + '</span>').join('') + '</div></div></div></div></div>';
+        [['search_results', stats.search_results == null ? null : stats.search_results, 'researcher'], ['pages_read', stats.pages || 0, 'researcher'], ['candidates', stats.pool || 0, 'researcher'], ['screened', stats.processed || 0, 'analyst'], ['qualified', q, 'manager']].map((r) => '<div class="funnel-row" data-agent="' + r[2] + '"><span class="text-2">' + t('run.f.' + r[0]) + '</span><div class="bar"><span style="width:' + Math.min(100, (r[1] || 0) / Math.max(1, stats.search_results || 0, stats.pages || 0, stats.pool || 0, stats.processed || 0, q) * 100) + '%"></span></div><b class="num" style="text-align:right">' + (r[1] == null ? '—' : U.fmtNum(r[1])) + '</b></div>').join('') +
+        '</div><div class="kv xs" style="margin-top:12px">' + [['discovered_urls', stats.discovered], ['backup', stats.backup], ['filtered', (stats.filtered || 0) + (stats.discarded || 0)], ['duplicate', stats.duplicate], ['queries', stats.queries], ['errors', stats.errors]].map(([k, v]) => '<span class="k">' + t('kpi.' + k) + '</span><span class="num">' + U.fmtNum(v) + '</span>').join('') + '</div>' + failedSources(stats) + '</div></div></div></div>';
       U.$$('[data-f]', el).forEach((b) => { b.onclick = () => { filter = b.dataset.f; draw(); }; });
       const stop = U.$('#run-stop', el);
       if (stop) stop.onclick = async () => { if (await U.confirmDialog({ title: t('run.stopTitle'), body: t('board.cancel_confirm'), ok: t('run.stop'), danger: true, onOk: () => api('POST', '/api/tasks/' + taskId + '/cancel') })) toast(t('run.stopped'), 'warn'); };
@@ -568,7 +579,7 @@
      ================================================================= */
   P.leads = {
     async render(params) {
-      const f = { grade: params.grade || '', qualified: params.qualified || '', country: params.country || '', source: params.source || '', status: params.status || '', q: params.q || '', task_id: params.task_id || '', page: +(params.page || 1) };
+      const f = { grade: agentEdition() ? '' : params.grade || '', qualified: agentEdition() ? '' : params.qualified || '', country: agentEdition() ? '' : params.country || '', source: params.source || '', status: params.status || '', q: params.q || '', task_id: params.task_id || '', page: +(params.page || 1) };
       const qs = (extra) => new URLSearchParams(Object.entries(Object.assign({}, f, extra || {})).filter(([, v]) => v !== '' && v != null)).toString();
       const [data, fac, pool] = await Promise.all([api('GET', '/api/leads?' + qs({ size: 50 })), api('GET', '/api/leads/facets'), api('GET', '/api/pool/status')]);
       S.leadSel = new Set(); S.leadF = f;
@@ -582,9 +593,9 @@
         '<button class="btn btn-danger-ghost btn-sm hidden" id="l-del" data-action="leadsDelete">' + icon('trash') + '<span></span></button></div></div>' +
         poolCard(pool) +
         (f.task_id ? '<div class="alert alert-info">' + icon('search') + '<span>' + t('leads.task_filter', { id: f.task_id }) + '</span><div class="alert-actions"><button class="btn btn-secondary btn-sm" data-action="go" data-route="leads">' + t('leads.clear_filter') + '</button></div></div>' : '') +
-        '<div class="row wrap" style="margin-bottom:12px;gap:8px">' + chip('grade', '', t('c.all'), curChip === 'all') + chip('grade', 'A', grade('A') + ' <span class="xs muted">' + c.a + '</span>', curChip === 'A') + chip('grade', 'B', grade('B') + ' <span class="xs muted">' + c.b + '</span>', curChip === 'B') + chip('qualified', '0', esc(t('leads.backup')), curChip === 'backup') +
+        '<div class="row wrap" style="margin-bottom:12px;gap:8px">' + chip('grade', '', t('c.all'), curChip === 'all') + (agentEdition() ? '' : chip('grade', 'A', grade('A') + ' <span class="xs muted">' + c.a + '</span>', curChip === 'A') + chip('grade', 'B', grade('B') + ' <span class="xs muted">' + c.b + '</span>', curChip === 'B') + chip('qualified', '0', esc(t('leads.backup')), curChip === 'backup')) +
         '<span class="grow"></span><div class="input-group" style="width:220px">' + icon('search') + '<input class="input input-sm" id="l-q" placeholder="' + esc(t('leads.searchPh')) + '" value="' + esc(f.q) + '"></div>' +
-        '<select class="select input-sm" style="width:140px" data-change="lfSel" data-k="country">' + opt('', f.country, t('leads.country') + ' ▾') + fac.countries.map((x) => opt(x, f.country, U.countryName(x))).join('') + '</select>' +
+        (agentEdition() ? '' : '<select class="select input-sm" style="width:140px" data-change="lfSel" data-k="country">' + opt('', f.country, t('leads.country') + ' ▾') + fac.countries.map((x) => opt(x, f.country, U.countryName(x))).join('') + '</select>') +
         '<select class="select input-sm" style="width:140px" data-change="lfSel" data-k="source">' + opt('', f.source, t('leads.source') + ' ▾') + fac.sources.map((s) => opt(s, f.source, t('source.' + s))).join('') + '</select>' +
         '<select class="select input-sm" style="width:140px" data-change="lfSel" data-k="status">' + opt('', f.status, t('leads.status') + ' ▾') + fac.statuses.map((s) => opt(s, f.status, t('lstatus.' + s))).join('') + '</select></div>' +
         '<div class="card">' + (data.items.length ? '<div class="table-wrap"><table class="table"><thead><tr><th class="w-check"><input type="checkbox" data-change="leadSelAll"></th><th style="width:48px">' + t('leads.grade') + '</th><th>' + t('leads.company') + '</th><th>' + t('leads.country') + '</th><th>' + t('leads.contactCol') + '</th><th>' + t('leads.status') + '</th><th>' + t('leads.found') + '</th></tr></thead><tbody>' +
@@ -632,6 +643,16 @@
     if (await U.confirmDialog({ title: t('leads.delete_sel'), body: t('leads.delete_confirm', { n }), ok: t('c.delete'), danger: true, onOk: () => api('POST', '/api/leads/delete', { ids: [...S.leadSel] }) })) { toast(t('leads.deleted', { n })); U.refresh(); }
   };
 
+  function marketEvidence(profile) {
+    if (!profile.market_validation && !profile.b2b_validation) return '';
+    const card = (key, value) => {
+      value = value || { status: 'unverified' };
+      const status = ['matched', 'mismatch', 'suspected'].includes(value.status) ? value.status : 'unverified';
+      const evidence = (value.evidence || []).concat(value.negative_evidence || []);
+      return '<div class="card" style="margin-top:10px"><div class="card-body"><b>' + t(key) + '</b> <span class="tag ' + (status === 'matched' ? 'tag-success' : 'tag-warning') + '">' + t('edition.evidence.' + status) + '</span>' + (value.segment ? '<p class="xs muted">' + esc(U.has('edition.segment.' + value.segment) ? t('edition.segment.' + value.segment) : value.segment) + '</p>' : '') + evidence.map((e) => '<div class="quote" style="margin-top:8px"><p class="small">' + esc(e.quote || '') + '</p>' + (/^https?:\/\//i.test(e.url || '') ? '<a class="xs" href="' + esc(e.url) + '" target="_blank" rel="noopener noreferrer">' + esc(e.url) + '</a>' : '<span class="xs muted">' + esc(e.url || '') + '</span>') + '</div>').join('') + '</div></div>';
+    };
+    return '<div class="section-title" style="margin-top:20px">' + t('edition.validation') + '</div><p class="hint">' + t('edition.marketHint') + '</p>' + card('edition.marketEvidence', profile.market_validation) + card('edition.b2bEvidence', profile.b2b_validation);
+  }
   /* 线索详情抽屉：客户画像 · 判断依据 · 来源链接+原文 · 👍 / 这条不好 / 已成交 */
   async function openLead(id) {
     let d;
@@ -647,7 +668,7 @@
       (d.posted_at ? '<span>·</span><span>' + U.ago(d.posted_at) + '</span>' : '') + (d.intent ? '<span class="tag">' + t('intent.' + d.intent) + '</span>' : '') + statusTag(d) + '</div></div>' +
       '<button class="btn btn-ghost btn-icon btn-sm" data-action="closeDrawer">' + icon('x') + '</button></div>' +
       '<div class="drawer-body">' +
-      (d.qualified ? '<div class="alert alert-success">' + icon('checkCircle') + '<span><b>' + t('lead.qualified') + '</b> ' + t('lead.qualified_sub') + '</span></div>' : '<div class="alert alert-warning">' + icon('alert') + '<span><b>' + t('lead.backup') + '</b> ' + t('nq.' + d.not_qualified_reason) + '</span></div>') +
+      (agentEdition() ? '<div class="alert alert-info"><span><b>' + t('edition.pendingLead') + '</b> ' + t('edition.pendingHint') + '</span></div>' : d.qualified ? '<div class="alert alert-success">' + icon('checkCircle') + '<span><b>' + t('lead.qualified') + '</b> ' + t('lead.qualified_sub') + '</span></div>' : '<div class="alert alert-warning">' + icon('alert') + '<span><b>' + t('lead.backup') + '</b> ' + t('nq.' + d.not_qualified_reason) + '</span></div>') +
       '<div class="section-title" style="margin-top:16px">' + icon('user') + t('rv.contact') + '</div>' + (ct.name ? '<div class="small">' + esc(ct.name) + (ct.title ? ' · ' + esc(ct.title) : '') + '</div>' : '') + '<div style="margin-top:6px">' + contactLine(d) + '</div>' +
       (c.email ? '<div class="xs muted" style="margin-top:4px">' + t('leads.d.emailSecondary') + '：<span class="mono">' + esc(c.email) + '</span></div>' : '') +
       ((d.contacts || []).length > 1 ? '<details style="margin-top:6px"><summary class="xs muted" style="cursor:pointer">' + t('lead.contacts') + ' (' + d.contacts.length + ')</summary><div class="table-wrap" style="margin-top:6px"><table class="table"><tbody>' +
@@ -655,7 +676,8 @@
       '<div class="section-title" style="margin-top:20px">' + icon('building') + t('leads.d.profile') + '</div>' +
       pf('leads.d.intro', p.summary) + pf('leads.d.size', p.size) + pf('lead.markets', p.markets) + pf('leads.d.news', p.recent_news) + pf('leads.d.pain', p.pain_points) + pf('lead.signals', p.buying_signals) + pf('leads.d.fit', p.fit_points) + pf('leads.d.risk', p.risks) +
       (d.website ? '<div class="xs muted">' + t('lead.website') + '：<a href="' + esc(d.website) + '" target="_blank" rel="noopener noreferrer">' + esc(d.website) + '</a></div>' : '') +
-      '<div class="section-title" style="margin-top:20px">' + icon('sparkles') + t('leads.d.basis') + '</div><div class="alert ' + (d.grade === 'A' ? 'alert-success' : 'alert-info') + '">' + icon('zap') + '<span>' + esc(p.grade_reason || '-') + '<br><span class="xs">' + t('lead.hard_country') + ' ' + yes(hm.country_ok) + ' ' + t('lead.hard_type') + ' ' + yes(hm.customer_type_ok) + ' ' + t('lead.hard_excluded') + ' ' + yes(!hm.excluded) + '</span></span></div>' +
+      marketEvidence(p) +
+      '<div class="section-title" style="margin-top:20px">' + icon('sparkles') + t('leads.d.basis') + '</div><div class="alert ' + (d.grade === 'A' ? 'alert-success' : 'alert-info') + '">' + icon('zap') + '<span>' + esc(p.grade_reason || '-') + '<br><span class="xs">' + t(p.market_validation ? 'edition.marketEvidence' : 'lead.hard_country') + ' ' + (p.market_validation ? '<span class="tag">' + t('edition.evidence.' + (['matched', 'mismatch'].includes(p.market_validation.status) ? p.market_validation.status : 'unverified')) + '</span>' : yes(hm.country_ok)) + ' ' + t('lead.hard_type') + ' ' + yes(hm.customer_type_ok) + ' ' + t('lead.hard_excluded') + ' ' + yes(!hm.excluded) + '</span></span></div>' +
       '<div class="section-title" style="margin-top:20px">' + icon('link') + t('leads.d.sources') + '</div>' +
       ((d.sources || []).length ? d.sources.map((s) => '<div class="quote" style="margin-bottom:10px"><div class="row xs muted" style="justify-content:space-between"><span class="row ellipsis" style="gap:6px">' + icon(/t\.me/.test(s.url || '') ? 'telegram' : /youtube/.test(s.url || '') ? 'youtube' : 'globe') + esc(s.title || s.url) + '</span>' +
         (s.url && /^https?:/.test(s.url) ? '<a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + t('leads.d.openSource') + ' ' + icon('external') + '</a>' : '') + '</div>' + (s.quote ? '<div style="margin-top:4px">“' + U.txt(s.quote) + '”</div>' : '') + '<div class="xs muted mono ellipsis" style="margin-top:4px">' + esc(s.url || '') + '</div></div>').join('')
@@ -703,7 +725,7 @@
   /* 求购说法 / 打分标准：AI 根据你的资料生成（PRD 2.4.2，不写死在程序里）；在右边的对话里说就能改 */
   /* 打分标准（U31）：只显示中文说明，不显示程序名和权重 */
   const criteriaHtml = (i) => (i.grading_criteria || []).length ? '<ul class="small" style="margin:0;padding-left:18px">' + (i.grading_criteria || []).map((c) => '<li>' + esc(c.description || '') + '</li>').join('') + '</ul><div class="hint">' + t('icp3.aiHint') + '</div>' : '<div class="small muted">' + t('icp3.notYet') + '</div>';
-  const EMPTY_ICP = () => ({ name: '', product: '', countries: [], customer_types: [], industries: [], company_size: '', buy_words: [], product_words: [], exclude_words: [], exclude_companies: [], reference_customers: [], contact_titles: [], relax_policy: { allow_neighbor_countries: false, allow_change_customer_type: false, allow_more_industries: false, notes: '' }, qualified_grades: ['A', 'B'] });
+  const EMPTY_ICP = () => ({ ...(S.meta.edition && S.meta.edition.id === 'my_igaming' ? { geo_mode: 'served_market', target_markets: ['MY'], b2b_segment: 'channel_team' } : {}), name: '', product: '', countries: [], customer_types: [], industries: [], company_size: '', buy_words: [], product_words: [], exclude_words: [], exclude_companies: [], reference_customers: [], contact_titles: [], relax_policy: { allow_neighbor_countries: false, allow_change_customer_type: false, allow_more_industries: false, notes: '' }, qualified_grades: ['A', 'B'] });
   P.icp = {
     title: () => t('nav.icp'),
     async render(params) {
@@ -764,6 +786,7 @@
     };
     const form = () => {
       const i = st.icp, f = U.$('#icp-form', root);
+      const editionFields = (S.meta.edition && S.meta.edition.id === 'my_igaming') || i.geo_mode === 'served_market';
       const row = (k, label, req, html) => '<div class="icp-field"><div class="k">' + label + (req ? ' <span style="color:var(--color-danger)">*</span>' : '') + '</div><div id="' + k + '">' + (html || '') + '</div></div>';
       /* 线索词放在最上面（PRD §3）：求购词 / 产品词 / 排除词，中 / 英 / 马来文 */
       f.innerHTML = '<div class="icp-words" style="margin-bottom:14px;padding:12px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface-2)">' +
@@ -771,16 +794,19 @@
         row('f-buy', t('icp4.buy'), true) + row('f-prod', t('icp4.prod'), true) + row('f-exw', t('icp4.exw')) + '</div>' +
         row('f-name', t('icp.name'), true, '<input class="input" id="f-name-i" value="' + esc(i.name) + '">') +
         row('f-product', t('icp.product'), true, '<textarea class="textarea" id="f-product-i">' + esc(i.product) + '</textarea>') +
-        row('f-countries', t('icp.countries')) + row('f-types', t('icp.customer_types'), true) + row('f-ind', t('icp.industries')) +
+        (editionFields ? row('f-geo', t('edition.geoMode'), false, '<select class="select" id="f-geo-i">' + ['served_market', 'registered_country'].map((m) => '<option value="' + m + '"' + (i.geo_mode === m ? ' selected' : '') + '>' + t('edition.geo.' + m) + '</option>').join('') + '</select><p class="hint">' + t('edition.marketHint') + '</p>') + row('f-segment', t('edition.segment'), false, '<select class="select" id="f-segment-i">' + ['channel_team'].map((k) => '<option value="' + k + '"' + (i.b2b_segment === k ? ' selected' : '') + '>' + t('edition.segment.' + k) + '</option>').join('') + '</select>') : '') +
+        row('f-countries', t(i.geo_mode === 'served_market' ? 'edition.servedMarkets' : 'icp.countries')) + row('f-types', t('icp.customer_types'), true) + row('f-ind', t('icp.industries')) +
         row('f-size', t('icp.company_size'), false, '<input class="input" id="f-size-i" value="' + esc(i.company_size) + '" placeholder="' + esc(t('icp.size_ph')) + '">') +
         row('f-exc', t('icp.exclude_companies')) + row('f-ref', t('icp.reference_customers')) + row('f-titles', t('icp.contact_titles')) +
         row('f-relax', t('icp.relax'), false, ['allow_neighbor_countries:icp.relax_neighbor', 'allow_change_customer_type:icp.relax_type', 'allow_more_industries:icp.relax_industry'].map((x) => { const [k, l] = x.split(':'); return '<label class="checkbox small" style="display:flex"><input type="checkbox" data-relax="' + k + '" ' + (i.relax_policy[k] ? 'checked' : '') + '>' + t(l) + '</label>'; }).join('') +
           '<input class="input input-sm" id="f-rn" style="margin-top:6px" value="' + esc(i.relax_policy.notes || '') + '" placeholder="' + esc(t('icp.relax_notes')) + '"><div class="hint">' + t('icp.relax_hint') + '</div>') +
         row('f-criteria', t('icp3.criteria'), false, criteriaHtml(i)) +
-        row('f-grades', t('icp.grades'), false, '<div class="row">' + ['A', 'B', 'C'].map((g) => '<label class="checkbox"><input type="checkbox" data-g="' + g + '" ' + (i.qualified_grades.includes(g) ? 'checked' : '') + ' ' + (g === 'A' ? 'disabled' : '') + '>' + grade(g) + '</label>').join('') + '</div><div class="hint">' + t('icp.grades_hint') + '</div>');
-      W.countries = countryField(i.countries);
+        (agentEdition() ? '<p class="hint">' + t('edition.pendingHint') + '</p>' : row('f-grades', t('icp.grades'), false, '<div class="row">' + ['A', 'B', 'C'].map((g) => '<label class="checkbox"><input type="checkbox" data-g="' + g + '" ' + (i.qualified_grades.includes(g) ? 'checked' : '') + ' ' + (g === 'A' ? 'disabled' : '') + '>' + grade(g) + '</label>').join('') + '</div><div class="hint">' + t('icp.grades_hint') + '</div>'));
+      W.countries = i.geo_mode === 'served_market' ? tagInput(i.target_markets || [], { placeholder: 'MY', format: U.countryName, suggestions: Object.keys(S.meta.geo.countries) }) : countryField(i.countries);
+      const geoInput = U.$('#f-geo-i', root);
+      if (geoInput) geoInput.onchange = () => { st.icp = collect(); st.icp.geo_mode = geoInput.value; form(); markDirty(); };
       U.$('#f-countries', root).appendChild(W.countries);
-      U.$('#f-countries', root).insertAdjacentHTML('beforeend', '<div id="f-adapt" style="margin-top:8px">' + adaptation(i.countries) + '</div>');
+      U.$('#f-countries', root).insertAdjacentHTML('beforeend', '<div id="f-adapt" style="margin-top:8px">' + adaptation(i.geo_mode === 'served_market' ? i.target_markets : i.countries) + '</div>');
       W.types = tagInput(i.customer_types, { placeholder: t('icp.types_ph'), format: U.ctypeName });
       U.$('#f-types', root).appendChild(W.types);
       [['buy', 'buy_words', 'f-buy', 'icp4.buyPh'], ['prod', 'product_words', 'f-prod', 'icp4.prodPh'], ['exw', 'exclude_words', 'f-exw', 'icp4.exwPh'],
@@ -790,12 +816,12 @@
     };
     // 保留表单里没有的字段（订单大小、采购场景、求购说法、打分标准……），只覆盖表单里改的
     const collect = () => Object.assign({}, st.icp, {
-      name: U.$('#f-name-i', root).value.trim(), product: U.$('#f-product-i', root).value.trim(), countries: W.countries.get(), customer_types: W.types.get(),
+      name: U.$('#f-name-i', root).value.trim(), product: U.$('#f-product-i', root).value.trim(), countries: st.icp.geo_mode === 'served_market' ? (st.icp.countries || []) : W.countries.get(), ...(U.$('#f-geo-i', root) ? { geo_mode: st.icp.geo_mode || 'registered_country', target_markets: st.icp.geo_mode === 'served_market' ? W.countries.get() : (st.icp.target_markets || []), b2b_segment: U.$('#f-segment-i', root).value } : {}), customer_types: W.types.get(),
       industries: W.ind.get(), company_size: U.$('#f-size-i', root).value.trim(),
       buy_words: W.buy.get(), product_words: W.prod.get(), exclude_words: W.exw.get(),
       exclude_companies: W.exc.get(), reference_customers: W.ref.get(), contact_titles: W.titles.get(),
       relax_policy: Object.assign({ notes: U.$('#f-rn', root).value.trim() }, Object.fromEntries(U.$$('[data-relax]', root).map((c) => [c.dataset.relax, c.checked]))),
-      qualified_grades: ['A'].concat(['B', 'C'].filter((g) => U.$('[data-g=' + g + ']', root).checked)),
+      qualified_grades: agentEdition() ? (st.icp.qualified_grades || ['A', 'B', 'C']) : ['A'].concat(['B', 'C'].filter((g) => U.$('[data-g=' + g + ']', root).checked)),
     });
     const reasons = () => {
       const c = U.$('#icp-reasons', root);
@@ -813,7 +839,9 @@
       const cur = collect(); st.chat.push({ role: 'user', content: msg }); inp.value = ''; chat();
       try {
         const r = await busy(U.$('#icp-send', root), () => api('POST', '/api/icps/chat', { icp: cur, message: msg, history: st.chat.slice(0, -1) }));
-        st.icp = Object.assign(EMPTY_ICP(), r.icp); markDirty();
+        st.icp = Object.assign(EMPTY_ICP(), r.icp);
+        for (const key of ['geo_mode', 'target_markets', 'b2b_segment']) if (!(key in (r.icp || {})) && key in cur) st.icp[key] = cur[key];
+        markDirty();
         st.chat.push({ role: 'assistant', content: r.reply + (r.changes && r.changes.length ? '\n' + r.changes.map((x) => '• ' + x).join('\n') : '') });
         chat(); form(); toast(t('icp.changed', { n: (r.changes || []).length || 1 }));
       } catch (err) { st.chat.pop(); chat(); inp.value = msg; toastErr(err); }

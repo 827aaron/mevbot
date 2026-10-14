@@ -10,7 +10,7 @@ import io
 import json
 import re
 
-from .. import countries, db, llm, prompts
+from .. import countries, db, edition, llm, prompts
 from ..errors import UserError
 from ..sources import crawler as crawler_mod
 from . import schemas
@@ -34,6 +34,9 @@ def rules(lang) -> str:
 def scope_vars() -> dict:
     """提示词里的范围说明（v1 只做马来西亚、中 / 英 / 马来语，PRD §1）。"""
     word_langs = ", ".join(f"{countries.lang_name(x)} ({x})" for x in countries.LEAD_LANGS)   # 线索词的语言：中 / 英 / 马来
+    if edition.current()["id"] == "my_igaming":
+        return {"scope": edition.market_instructions({"geo_mode": "served_market", "target_markets": ["MY"], "b2b_segment": ""}),
+                "langs": "zh, ms", "word_langs": word_langs}
     if countries.V1_SCOPE:
         return {"scope": prompts.get("scope.v1"), "langs": ", ".join(x for x in countries.LEAD_LANGS if x != "en"),
                 "word_langs": word_langs}
@@ -42,7 +45,7 @@ def scope_vars() -> dict:
 
 def _system(lang):
     from . import memory
-    return prompts.render("icp.design", role=memory.role("manager"), rules=rules(lang))
+    return prompts.render("icp.design", role=memory.role("manager"), rules=rules(lang)) + "\nPreserve geo_mode, target_markets and b2b_segment from the existing template; countries are registration criteria only when geo_mode=registered_country."
 
 
 # ------------------------------------------------------------------ 输入素材
@@ -107,9 +110,19 @@ def _list(v):
 
 def normalize(icp: dict, strict=False) -> dict:
     icp = dict(icp or {})
+    mode = icp.get("geo_mode") or edition.current()["geo_mode"]
+    if mode not in ("registered_country", "served_market"):
+        raise UserError("invalid_value", field="geo_mode")
+    segment = icp.get("b2b_segment") or ""
+    if segment not in ("", "channel_team", "igaming_company"):
+        raise UserError("invalid_value", field="b2b_segment")
+    markets = [c for c in dict.fromkeys(countries.normalize_country(x) for x in _list(icp.get("target_markets"))) if c]
+    if edition.current()["id"] == "my_igaming":
+        mode, markets, segment = "served_market", ["MY"], "channel_team"
     out = {
+        "geo_mode": mode, "target_markets": markets, "b2b_segment": segment,
         "name": str(icp.get("name") or "").strip()[:120],
-        "product": str(icp.get("product") or "").strip(),
+        "product": str(icp.get("product") or "").strip() or ("查找面向马来西亚市场的公开 iGaming 业务代理线索" if edition.current()["id"] == "my_igaming" else ""),
         # 目标国家：客户自己说的（补充访谈 / 对话），可以为空 = 不按国家筛（PRD §1 / §3）
         "countries": [c for c in dict.fromkeys(countries.normalize_country(x) for x in _list(icp.get("countries"))) if c],
         "customer_types": _list(icp.get("customer_types")),
@@ -203,7 +216,11 @@ def chat(icp: dict, message: str, history: list | None = None, lang="zh") -> dic
                           history=hist or "(none)", message=message.strip())
     data, _ = llm.call_json(AGENT, "icp_chat", _system(lang), user, schemas.ICP_CHAT,
                             context={"icp": icp, "message": message, "lang": lang})
-    return {"icp": normalize(data.get("icp") or icp), "reply": data.get("reply") or "",
+    changed = dict(data.get("icp") or icp)
+    for field in ("geo_mode", "target_markets", "b2b_segment"):
+        if field in icp:
+            changed[field] = icp[field]
+    return {"icp": normalize(changed), "reply": data.get("reply") or "",
             "changes": data.get("changes") or []}
 
 
@@ -284,6 +301,12 @@ def add_languages(icp: dict, old: dict | None = None) -> dict:
 
 
 def save(data: dict, icp_id: int | None = None, reasons=None, chat_log=None, origin="manual"):
+    data = dict(data)
+    if icp_id:
+        previous = get(icp_id)["data"]
+        for field in ("geo_mode", "target_markets", "b2b_segment"):
+            if field not in data and field in previous:
+                data[field] = previous[field]
     icp = normalize(data, strict=True)
     now = db.now()
     if icp_id:
@@ -420,7 +443,7 @@ def search_queries(data: dict, n: int, lang: str = "en") -> list[dict]:
     外文词配外文词；国家名用对应语言。轮流取不同的产品词，尽量不重复。"""
     w = {"buy": [x for x in data.get("buy_words") or [] if x.strip()],
          "product": [x for x in data.get("product_words") or [] if x.strip()]}
-    codes = [c for c in data.get("countries") or [] if c]
+    codes = [c for c in (data.get("target_markets") if edition.served_market(data) else data.get("countries")) or [] if c]
     out, seen = [], set()
     prods = w["product"] or [""]
     buys = w["buy"] or [""]

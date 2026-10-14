@@ -221,6 +221,12 @@ def _restart_task(run, silent: float) -> dict:
     run.done = True
     run.status = "restarted"
     db.execute("UPDATE tasks SET status='restarted', result='stuck', finished_at=? WHERE id=?", (db.now(), run.id))
+    if run.params.get("continuous_monitor"):
+        # The daily scout owns this durable collector. Keeping its ownership
+        # lets disabling monitoring cancel the resumed task as well.
+        db.execute("UPDATE tasks SET status='interrupted' WHERE id=?", (run.id,))
+        run.status = "interrupted"
+        return {"task": run.id, "retry_owner": "scout"}
     # Manager's persisted plan owns the retry budget. A watchdog restart must
     # not create another uncounted lineage (and another paid model invocation).
     ident, seen = run.id, set()

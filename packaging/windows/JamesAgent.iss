@@ -5,7 +5,7 @@
 ; 未做代码签名（第 5a 测试版）：第一次运行会被 SmartScreen 拦下 → 「更多信息」→「仍要运行」。
 
 #ifndef AppVersion
-  #define AppVersion "0.2.3"
+  #define AppVersion "0.3.1"
 #endif
 #define AppNameZh "詹姆斯智能体"
 #define AppExe "JamesAgent.exe"

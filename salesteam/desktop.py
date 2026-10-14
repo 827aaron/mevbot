@@ -25,7 +25,8 @@ import traceback
 import urllib.request
 
 HOST = "127.0.0.1"
-APP_DIR_NAME = "JamesAgent"
+from . import edition
+APP_DIR_NAME = edition.current()["data_dir_name"]
 MAX_RESTARTS = 5                 # 10 分钟内最多自动重启几次（再多说明有持续性问题，停止重启并在界面提示）
 
 

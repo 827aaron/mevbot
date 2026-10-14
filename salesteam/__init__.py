@@ -9,8 +9,10 @@
 - api/       : HTTP 接口（FastAPI，只监听 127.0.0.1）
 """
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
-# 产品名（暂定，只在这里和 web/i18n/*.json 的 app.name / app.tagline 里出现）
-APP_NAME = {"zh": "詹姆斯智能体", "en": "James Agent"}
-APP_TAGLINE = {"zh": "本地多智能体销售团队", "en": "Your local AI sales team"}
+# Runtime selection also works with an embedded edition.json in frozen builds.
+from . import edition
+_EDITION = edition.current()
+APP_NAME = _EDITION["name"]
+APP_TAGLINE = _EDITION["tagline"]

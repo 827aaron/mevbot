@@ -50,6 +50,53 @@ def set_agent_enabled(agent: str, data: dict = Depends(body)):
 
 # ------------------------------------------------------------------ TG 账号池 / 群
 
+@router.get("/source-pool")
+def source_pool_state():
+    from . import source_pool
+    return source_pool.state()
+
+
+@router.put("/source-pool/settings")
+def source_pool_settings(data: dict = Depends(body)):
+    from . import source_pool
+    return source_pool.set_settings(data)
+
+
+@router.post("/source-pool")
+def source_pool_add(data: dict = Depends(body)):
+    from . import source_pool
+    return source_pool.add(data)
+
+
+@router.put("/source-pool/{cid}")
+def source_pool_update(cid: int, data: dict = Depends(body)):
+    from . import source_pool
+    return source_pool.update(cid, data)
+
+
+@router.get("/social/{platform}/status")
+def social_status(platform: str):
+    from . import social
+    return social.status(platform)
+
+
+@router.post("/social/{platform}/login")
+def social_login(platform: str):
+    from . import social
+    return social.open_login(platform)
+
+
+@router.post("/social/{platform}/login/done")
+def social_login_done(platform: str):
+    from . import social
+    return social.finish_login(platform)
+
+
+@router.delete("/social/{platform}/session")
+def social_logout(platform: str):
+    from . import social
+    return social.clear_session(platform)
+
 @router.get("/tg/config")
 def tg_config():
     return {**pool.tg_config(), "warnings": pool.warnings()}

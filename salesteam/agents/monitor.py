@@ -23,6 +23,8 @@ from ..llm.mock import mock_kind as _mock_kind     # 只给测试模式（mock �
 from ..tg import base, pool
 from . import learning, memory
 
+from .. import edition
+
 AGENT = "monitor"
 BATCH = 12
 DEFAULT_BACKLOG_DAYS = 7     # 第一次往回读 7 天（PRD 6.4，固定起点；由销售主管按群调整）
@@ -97,6 +99,8 @@ class Monitor:
         if icp_id and self.icp_mod.needs_rules(self.icp_mod.get(icp_id)["data"]):
             self.icp_mod.ensure_rules(icp_id, task_id=self.run.id)   # 旧模板：先让主管生成“求购说法”
         data = self.icp_mod.effective_data(icp_id) if icp_id else {}
+        from .. import source_pool
+        data = {**data, "product_words": list(dict.fromkeys((data.get("product_words") or []) + source_pool.keywords_for(icp_id)))}
         words = self.icp_mod.lead_words(data)
         types = [k["content"] for k in learning.active_knowledge(icp_id) if k["kind"] == "message_type"] if icp_id else []
         c = {"icp_id": icp_id, "icp": data, "words": words, "types": types}
@@ -282,6 +286,14 @@ class Monitor:
         都没命中的再看本地语义相似（和客户教过的好例子意思相近）。"""
         out, rest = [], []
         for m, t in texts:
+            if edition.signal_mode(c["icp"]):
+                signal = edition.validate_b2b(c["icp"], [{"url": m.get("link", ""), "text": t}])
+                if signal["status"] == "matched":
+                    out.append({**m, "_why": "agent_signal"})
+                elif self.icp_mod.match_words(t, c["words"]) == "hit":
+                    # Manual search features are a prefilter, not proof of agency.
+                    out.append({**m, "_why": "keyword"})
+                continue
             hit = self.icp_mod.match_words(t, c["words"])
             if hit == "hit":
                 out.append({**m, "_why": "keyword"})
@@ -302,6 +314,15 @@ class Monitor:
     # ---------------------------------------------------- ② 判断模型 + ③ 大模型
     def classify(self, be, acc, acc_row, chat, cands, c, task) -> set:
         """一批候选消息按一个任务的模板判断；求购的写成这个任务的线索。返回命中的消息 ID。"""
+        if edition.signal_mode(c["icp"]):
+            hits = set()
+            for m in cands:
+                if edition.validate_b2b(c["icp"], [{"url": m.get("link", ""), "text": m.get("text", "")}])["status"] != "matched":
+                    continue
+                self.add_lead(be, acc, acc_row, chat, m,
+                              {"message_type": "agent_signal", "intent": "unverified", "need": m["text"][:300]}, task)
+                hits.add(m["id"])
+            return hits
         resolved, need_llm = [], []
         if decision.enabled():
             for m in cands:
@@ -405,6 +426,11 @@ class Monitor:
                 "intent_note": intent_note, "channel_id": self._channel(chat), "tg": {"chat_id": chat["chat_id"], "chat_title": chat["title"],
                                                           "msg_id": m["id"], "sender_id": m.get("sender_id"),
                                                           "username": username, "bio": bio, "why": m.get("_why")}}
+        if it.get("message_type") == "agent_signal":
+            # Only the author's actual message is agency evidence, never a group
+            # description or another member's profile.
+            cand["verified_evidence"] = {"url": m.get("link", ""), "quote": m["text"][:1000],
+                                         "origin": "tg_message", "author": username or str(m.get("sender_id") or "")}
         rid = db.execute(
             "INSERT INTO raw_leads(task_id, source, source_url, source_title, company_name, website, country, data, "
             "evidence, status, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",

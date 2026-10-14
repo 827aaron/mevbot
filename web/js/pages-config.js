@@ -53,7 +53,8 @@
     async render() {
       const tab = ['tg', 'groups'].includes(S.tabs.accounts) ? S.tabs.accounts : 'tg';
       S.tabs.accounts = tab; // Old mail/platform links fall back to the usable TG page.
-      const [d, cfg] = await Promise.all([api('GET', '/api/tg/accounts'), api('GET', '/api/tg/config')]);
+      const [d, cfg, pool] = await Promise.all([api('GET', '/api/tg/accounts'), api('GET', '/api/tg/config'), api('GET', '/api/source-pool')]);
+      S.socialPlatforms = pool.platforms || [];
       S.accData = d; S.tgCfg = cfg;
       let body;
       if (tab === 'tg' || tab === 'groups') body = tgTab(d, cfg);
@@ -61,9 +62,13 @@
       else body = '<p class="small text-2" style="margin-bottom:12px">' + icon('shield') + ' ' + t('acc.pSub') + '</p><div class="card">' + empty({ icon: 'globe', title: t('acc2.platformSoon'), body: t('acc2.platformSoonSub') }) + '</div>';
       return '<div class="page-head"><div><h1>' + t('acc.title') + '</h1><p>' + t('acc.sub') + '</p></div><div class="row"><button class="btn btn-primary" data-action="addTg">' + icon('plus') + t('acc.addTg') + '</button></div></div>' +
         d.warnings.map((w) => '<div class="alert alert-warning">' + icon('alert') + '<span>' + t('warn.' + w.key, w.params) + '</span></div>').join('') +
-        U.tabs('accounts', [['tg', t('acc.tg'), 'telegram', d.accounts.length]], 'tg') + body;
+        U.tabs('accounts', [['tg', t('acc.tg'), 'telegram', d.accounts.length]], 'tg') + body + platformCards(S.socialPlatforms);
     },
   };
+  P.accounts.mount = (root) => U.every(3000, async () => {
+    if (!(S.socialPlatforms || []).some((p) => ['starting', 'open'].includes(p.status))) return;
+    try { S.socialPlatforms = await Promise.all(SOCIAL_PLATFORM_IDS.map((id) => api('GET', '/api/social/' + id + '/status'))); const box = U.$('#social-platform-cards', root); if (box && box.isConnected) box.outerHTML = platformCards(S.socialPlatforms); } catch (e) { /* Preserve the last known platform status. */ }
+  });
   function tgTab(d, cfg) {
     const configured = cfg.backend === 'mock' || (cfg.api_id && cfg.api_hash_set);
     const cred = (!configured || S.tgCredOpen)
@@ -327,6 +332,72 @@
   A.grpSt = (el) => { const f = grpFilter(); f.st = el.dataset.v; saveGrpFilter(); drawJoined(); };
   /* 账号池「群 N」→ 渠道池 TG 群，选好这个账号 */
   A.grpOfAcc = (el) => { const f = grpFilter(); f.acc = +el.dataset.id; f.st = 'all'; f.q = ''; saveGrpFilter(); S.tabs.channels = 'joined'; U.go('channels/joined'); };
+  const SOCIAL_PLATFORM_IDS = ['facebook', 'instagram', 'youtube', 'x', 'reddit'];
+  function platformCards(platforms) {
+    const byId = Object.fromEntries((platforms || []).map((p) => [p.id, p]));
+    return '<div class="grid grid-3" id="social-platform-cards" style="margin-top:16px">' + SOCIAL_PLATFORM_IDS.map((id) => {
+      const p = byId[id] || { status: 'none', configured: false };
+      const displayStatus = p.status === 'none' && p.configured ? 'done' : p.status;
+      return '<section class="card" data-social-platform="' + id + '"><div class="card-header"><h3>' + icon(['x', 'reddit'].includes(id) ? 'globe' : id) + t('social.' + id) + '</h3></div><div class="card-body"><p class="small">' + t('social.state.' + (['none', 'starting', 'open', 'done', 'error'].includes(displayStatus) ? displayStatus : 'none')) + '</p><p class="hint">' + t('social.sessionHint') + '</p>' + (p.error ? '<p class="small text-2">' + (U.has('errors.' + p.error) ? t('errors.' + p.error, {}) : esc(p.error)) + '</p>' : '') + '</div><div class="card-footer row wrap"><button class="btn btn-secondary btn-sm" data-action="socialLogin" data-platform="' + id + '">' + t('social.login') + '</button>' + (p.status === 'open' ? '<button class="btn btn-primary btn-sm" data-action="socialDone" data-platform="' + id + '">' + t('social.done') + '</button>' : '') + (p.configured ? '<button class="btn btn-ghost btn-sm" data-action="socialClear" data-platform="' + id + '">' + t('social.clear') + '</button>' : '') + '</div></section>';
+    }).join('') + '</div>';
+  }
+  A.socialLogin = async (el) => { await busy(el, () => api('POST', '/api/social/' + el.dataset.platform + '/login', {})); U.refresh(); };
+  A.socialDone = async (el) => { await busy(el, () => api('POST', '/api/social/' + el.dataset.platform + '/login/done', {})); U.refresh(); };
+  A.socialClear = async (el) => { if (await U.confirmDialog({ title: t('social.clear'), body: t('social.clearHint'), onOk: () => api('DELETE', '/api/social/' + el.dataset.platform + '/session') })) U.refresh(); };
+  const SOURCE_KINDS = ['fb_group', 'instagram_account', 'youtube_channel', 'forum', 'directory', 'news_source', 'x_account', 'reddit_community'];
+  function sourceReadError(key, item) {
+    if (['login_required', 'social_login_required'].includes(key)) return t('spool.loginRequired');
+    if (key === 'social_content_unavailable') return t('spool.readUnavailable');
+    if (String(key).startsWith('ev.')) return U.has(key) ? t(key, { url: (item || {}).url || '', reason: '', limit: '' }) : t('spool.readUnavailable');
+    return U.has('errors.' + key) ? t('errors.' + key, {}) : t('spool.readUnavailable');
+  }
+  function sourceReadState(item) {
+    if (item.last_error || String(item.last_status || '').startsWith('ev.')) return sourceReadError(item.last_error || item.last_status, item);
+    if (item.last_status === 'done') return t('spool.readDone');
+    return item.last_status ? (U.has('ops.state.' + item.last_status) ? t('ops.state.' + item.last_status) : t('spool.readUnavailable')) : t('scout.none');
+  }
+  function observedCount(value) { return value == null ? '—' : U.fmtNum(value); }
+  function sourceLineage(item) {
+    if (!item.parent_url) return '';
+    return '<div class="cell-sub" data-parent-source>' + t('spool.parentSource') + ': ' + (/^https?:\/\//i.test(item.parent_url) ? '<a href="' + esc(item.parent_url) + '" target="_blank" rel="noopener noreferrer">' + esc(item.parent_url) + '</a>' : esc(item.parent_url)) + (item.link_text ? ' · ' + esc(item.link_text) : '') + '</div>';
+  }
+  function incrementalCounts(item) {
+    return '<div class="cell-sub">' + t('spool.newItems') + ': <b data-source-count="new">' + observedCount(item.last_new_items == null ? item.new_items : item.last_new_items) + '</b> · ' + t('spool.duplicatesSkipped') + ': <b data-source-count="duplicates">' + observedCount(item.last_duplicate_items == null ? item.unchanged_items : item.last_duplicate_items) + '</b> · ' + t('spool.changedItems') + ': <b data-source-count="changed">' + observedCount(item.last_changed_items == null ? item.changed_items : item.last_changed_items) + '</b></div>';
+  }
+  function sourcePoolReport(report) {
+    if (!report || !(report.status || report.error || report.blocked)) return '';
+    const stats = report.stats || {}, error = report.error || report.blocked;
+    return '<div id="source-pool-report" class="ops-plan"><b>' + t('spool.latest') + '</b><p class="small">' + (report.day ? esc(report.day) + ' · ' : '') + (error ? sourceReadError(error, {}) : report.status === 'done' ? t('spool.taskEnded') : U.has('ops.state.' + report.status) ? t('ops.state.' + report.status) : esc(report.status)) + '</p><div class="row wrap xs muted">' + '<span>' + t('spool.addedSources') + ': <b>' + (report.added_sources == null ? '—' : U.fmtNum(report.added_sources)) + '</b></span>' + ['search_results', 'pages', 'qualified', 'errors'].map((key) => '<span>' + t(key === 'search_results' ? 'run.f.search_results' : key === 'pages' ? 'run.f.pages_read' : 'kpi.' + key) + ': <b>' + observedCount(stats[key]) + '</b></span>').join('') + '</div><p class="hint">' + t('spool.incrementalHint') + '</p><div class="row wrap xs muted">' + [['new', 'source_new_items', 'spool.newItems'], ['duplicates', 'source_unchanged_items', 'spool.duplicatesSkipped'], ['incremental', 'source_changed_items', 'spool.changedItems']].map(([name, key, label]) => '<span>' + t(label) + ': <b data-report-count="' + name + '">' + observedCount(stats[key]) + '</b></span>').join('') + '</div>' + (report.task_id ? '<button class="btn btn-secondary btn-sm" style="margin-top:8px" data-action="go" data-route="run" data-q="task=' + encodeURIComponent(report.task_id) + '">' + t('ops.details') + '</button>' : '') + '</div>';
+  }
+  function sourcePoolCard(data, icps) {
+    const cfg = data.settings || {}, items = data.items || [], report = data.report || {};
+    const keyword = (entry) => typeof entry === 'string' ? entry : entry.keyword || entry.word || entry.text || '';
+    const source = (entry) => typeof entry === 'object' ? entry.source_url || entry.url || '' : '';
+    return '<section class="card" id="source-pool" style="margin-bottom:16px"><div class="card-header"><h3>' + icon('globe') + t('spool.title') + '</h3><div class="actions"><button class="btn btn-secondary btn-sm" data-action="sourceAdd">' + icon('plus') + t('spool.add') + '</button></div></div><div class="card-body"><p class="small text-2">' + t('spool.hint') + '</p><form id="source-pool-form"><label class="checkbox" style="margin:12px 0"><input type="checkbox" id="source-pool-enabled"' + (cfg.enabled ? ' checked' : '') + '> ' + t('spool.enabled') + '</label><div class="form-grid"><div class="field"><label class="label" for="source-pool-icp">' + t('tasks.template') + '</label><select class="select" id="source-pool-icp"><option value="">' + t('ops.selectIcp') + '</option>' + icps.map((i) => '<option value="' + i.id + '"' + (i.id === cfg.icp_id ? ' selected' : '') + '>' + esc(i.name) + '</option>').join('') + '</select></div><div class="field"><label class="label" for="source-pool-time">' + t('ops.time') + '</label><input class="input" type="time" id="source-pool-time" required value="' + esc(cfg.time_of_day || '09:00') + '"></div></div><div class="field"><label class="label" for="source-pool-keywords">' + t('spool.keywords') + '</label><textarea class="textarea" id="source-pool-keywords" placeholder="' + esc(t('spool.keywordsHint')) + '">' + esc((cfg.keywords || []).join('\n')) + '</textarea></div><button class="btn btn-primary btn-sm" type="submit" id="source-pool-save" style="margin-top:12px">' + t('c.save') + '</button></form>' + ((cfg.discovered_keywords || []).length ? '<details style="margin-top:12px"><summary class="small">' + t('spool.discoveredKeywords') + '</summary><div class="row wrap" style="margin-top:8px">' + cfg.discovered_keywords.map((entry) => '<span class="tag">' + esc(keyword(entry)) + (source(entry) && /^https?:\/\//i.test(source(entry)) ? ' <a href="' + esc(source(entry)) + '" target="_blank" rel="noopener noreferrer">' + t('spool.evidence') + '</a>' : '') + '</span>').join('') + '</div></details>' : '') + sourcePoolReport(report) + '</div>' + (items.length ? '<div class="table-wrap"><table class="table"><thead><tr><th>' + t('spool.source') + '</th><th>' + t('spool.access') + '</th><th>' + t('spool.latest') + '</th><th>' + t('grp.monitor') + '</th></tr></thead><tbody>' + items.map((item) => '<tr data-source-id="' + item.id + '"><td><div class="cell-main">' + esc(item.name || item.url) + '</div><div class="cell-sub">' + esc(U.has('spool.kind.' + item.kind) ? t('spool.kind.' + item.kind) : item.kind) + ' · ' + esc(item.url || '') + '</div>' + sourceLineage(item) + '</td><td><select class="select input-sm" style="min-width:140px" data-change="sourceAccess" data-id="' + item.id + '" data-access="' + esc(item.access || 'public') + '">' + (item.platform ? ['public', 'login'] : ['public']).map((mode) => '<option value="' + mode + '"' + (item.access === mode ? ' selected' : '') + '>' + t('spool.access.' + mode) + '</option>').join('') + '</select></td><td class="small">' + sourceReadState(item) + incrementalCounts(item) + '</td><td>' + sw(item.status === 'monitored', 'data-change="sourceToggle" data-id="' + item.id + '"') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="small muted" style="padding:0 20px 16px">' + t('spool.empty') + '</p>') + '</section>';
+  }
+  function bindSourcePool(root) {
+    const form = U.$('#source-pool-form', root); if (!form) return;
+    const sync = () => { U.$('#source-pool-icp', form).required = U.$('#source-pool-enabled', form).checked; };
+    U.$('#source-pool-enabled', form).onchange = sync; sync();
+    form.onsubmit = async (event) => {
+      event.preventDefault(); const id = U.$('#source-pool-icp', form).value;
+      try { await busy(U.$('#source-pool-save', form), () => api('PUT', '/api/source-pool/settings', { enabled: U.$('#source-pool-enabled', form).checked, icp_id: id ? +id : null, time_of_day: U.$('#source-pool-time', form).value, keywords: U.$('#source-pool-keywords', form).value.split('\n').map((s) => s.trim()).filter(Boolean) }));
+      toast(t('c.saved')); U.refresh(); } catch (e) { toastErr(e); }
+    };
+  }
+  A.sourceAdd = async () => {
+    const w = U.openModal({ title: t('spool.add'), body: '<form id="source-add-form"><div class="field"><label class="label" for="source-add-url">URL</label><input class="input" type="url" required id="source-add-url" placeholder="https://..."></div><div class="field"><label class="label" for="source-add-name">' + t('spool.source') + '</label><input class="input" id="source-add-name" maxlength="200"></div><div class="form-grid"><div class="field"><label class="label" for="source-add-kind">' + t('ch.kind') + '</label><select class="select" id="source-add-kind">' + SOURCE_KINDS.map((kind) => '<option value="' + kind + '">' + t('spool.kind.' + kind) + '</option>').join('') + '</select></div><div class="field"><label class="label" for="source-add-access">' + t('spool.access') + '</label><select class="select" id="source-add-access">' + ['public', 'login'].map((mode) => '<option value="' + mode + '">' + t('spool.access.' + mode) + '</option>').join('') + '</select></div></div></form>', footer: '<button class="btn btn-secondary" data-action="closeModal">' + t('c.cancel') + '</button><button class="btn btn-primary" id="source-add-save">' + t('c.save') + '</button>' });
+    const syncMode = () => { const access = U.$('#source-add-access', w), allowed = ['fb_group', 'instagram_account', 'youtube_channel', 'x_account', 'reddit_community'].includes(U.$('#source-add-kind', w).value); access.querySelector('[value=login]').disabled = !allowed; if (!allowed) access.value = 'public'; };
+    U.$('#source-add-kind', w).onchange = syncMode; syncMode();
+    U.$('#source-add-save', w).onclick = async (event) => {
+      if (!U.$('#source-add-form', w).reportValidity()) return;
+      try { await busy(event.currentTarget, () => api('POST', '/api/source-pool', { url: U.$('#source-add-url', w).value.trim(), name: U.$('#source-add-name', w).value.trim(), kind: U.$('#source-add-kind', w).value, access: U.$('#source-add-access', w).value }));
+      U.closeModal(); toast(t('c.saved')); U.refresh(); } catch (e) { toastErr(e); }
+    };
+  };
+  A.sourceAccess = async (el) => { try { await api('PUT', '/api/source-pool/' + el.dataset.id, { access: el.value }); el.dataset.access = el.value; toast(t('c.saved')); } catch (e) { el.value = el.dataset.access; toastErr(e); } };
+  A.sourceToggle = async (el) => { const input = el.querySelector('input'); try { await api('PUT', '/api/source-pool/' + el.dataset.id, { status: input.checked ? 'monitored' : 'retired' }); toast(t('c.saved')); } catch (e) { input.checked = !input.checked; toastErr(e); } };
+
   async function allChannels() {
     const d = await api('GET', '/api/channels');
     const rows = d.items;
@@ -341,9 +412,18 @@
         : '<div class="card-body">' + empty({ icon: 'globe', title: t('ch.empty'), body: t('ch.emptySub'), actions: '<button class="btn btn-primary" data-action="go" data-route="accounts">' + t('nav.accounts') + '</button>' }) + '</div>') + '</div>' +
       '<p class="xs muted" style="margin-top:10px">' + icon('info') + ' ' + t('ch.foot') + '</p>';
   }
+  function discoveryEvidence(row) {
+    if (!(S.meta.edition && S.meta.edition.id === 'my_igaming')) return '';
+    const agent = row.agent_signal, source = row.source_signal;
+    const industry = !((agent || {}).evidence || []).length && !!((source || {}).evidence || []).length;
+    const value = industry ? source : agent || source;
+    if (!value) return '';
+    return '<div class="xs muted" style="margin-top:6px">' + t('scout.sourceCharacteristics') + (industry ? ' · ' + t('scout.industrySource') : '') + '</div>' + (value.evidence || []).slice(0, 2).map((e) => '<div class="xs quote" style="margin-top:4px">' + esc(e.quote || '') + '<div class="muted" style="overflow-wrap:anywhere">' + esc(e.url || '') + '</div></div>').join('');
+  }
   P.channels = {
     title: () => t('nav.channels'),
     mount(root) {
+      bindSourcePool(root);
       const q = U.$('#grp-q', root);
       if (!q) return;
       drawJoined();
@@ -354,7 +434,7 @@
       const [chats, ds, q, icps, ms, accs] = await Promise.all([api('GET', '/api/tg/chats'), api('GET', '/api/tg/discoveries'), api('GET', '/api/tg/join'), api('GET', '/api/icps'), api('GET', '/api/monitor/status'), api('GET', '/api/tg/accounts')]);
       S.grpSel = new Set();
       let body;
-      if (tab === 'all') body = await allChannels();
+      if (tab === 'all') { const pool = await api('GET', '/api/source-pool'); body = sourcePoolCard(pool, icps) + await allChannels(); }
       else if (tab === 'joined') {
         S.grp = { chats, icps, accs: accs.accounts };
         const f = grpFilter();
@@ -375,10 +455,10 @@
           (icps.length ? '<select class="select input-sm" id="g-icp" style="width:auto">' + icps.map((i) => '<option value="' + i.id + '">' + esc(i.name) + '</option>').join('') + '</select>' : '') +
           '<button class="btn btn-ai btn-sm" data-action="grpDiscover">' + icon('sparkles') + t('grp.findMore') + '</button></div></div>' +
           (ds.length ? '<div class="table-wrap"><table class="table"><thead><tr><th class="w-check"></th><th>' + t('grp.name') + '</th><th class="num">' + t('grp.members') + '</th><th>' + t('grp.activity') + '</th><th>' + t('grp.relevance') + '</th><th>' + t('grp.aiComment') + '</th><th>' + t('grp.col_status') + '</th></tr></thead><tbody>' +
-            ds.map((x) => '<tr' + (x.ad_prob > 0.5 ? ' style="opacity:.7"' : '') + '><td>' + (x.status === 'suggested' ? '<input type="checkbox" data-change="grpSel" data-id="' + x.id + '">' : '') + '</td><td><div class="cell-main">' + esc(x.title) + (x.ad_prob > 0.5 ? ' <span class="tag tag-danger">' + t('grp.adFlag') + '</span>' : '') + '</div><div class="cell-sub mono">' + esc(x.link) + ' · ' + t('disc.src_' + (x.source || 'tg_search')) + '</div></td>' +
+            ds.map((x) => '<tr' + (x.ad_prob > 0.5 && !(S.meta.edition && S.meta.edition.id === 'my_igaming') ? ' style="opacity:.7"' : '') + '><td>' + (x.status === 'suggested' ? '<input type="checkbox" data-change="grpSel" data-id="' + x.id + '">' : '') + '</td><td><div class="cell-main">' + esc(x.title) + (x.ad_prob > 0.5 ? ' <span class="tag tag-outline">' + t('grp.adFlag') + '</span>' : '') + '</div><div class="cell-sub mono">' + esc(x.link) + ' · ' + t('disc.src_' + (x.source || 'tg_search')) + '</div></td>' +
               '<td class="num">' + U.fmtNum(x.members) + '</td><td class="xs nowrap">' + (x.activity ? t('grp.perDay', { n: x.activity }) : '-') + '</td>' +
-              '<td style="min-width:120px"><div class="row" style="gap:8px"><div class="progress sm grow ' + (x.relevance < 0.5 ? 'danger' : '') + '"><span style="width:' + Math.round(x.relevance * 100) + '%"></span></div><b class="xs num">' + Math.round(x.relevance * 100) + '</b></div><div class="cell-sub">' + t('grp.rel_ad', { r: Math.round(x.relevance * 100), a: Math.round(x.ad_prob * 100) }) + '</div></td>' +
-              '<td class="small text-2" style="max-width:340px">' + esc(x.reason) + '</td><td>' + U.tag(t('disc.' + x.status), x.status === 'joined' ? 'tag-success' : x.status === 'approved' ? 'tag-primary' : x.status === 'rejected' ? '' : 'tag-info') + '</td></tr>').join('') + '</tbody></table></div>'
+              '<td style="min-width:120px"><div class="row" style="gap:8px"><div class="progress sm grow ' + (x.relevance < 0.5 && !(S.meta.edition && S.meta.edition.id === 'my_igaming') ? 'danger' : '') + '"><span style="width:' + Math.round(x.relevance * 100) + '%"></span></div><b class="xs num">' + Math.round(x.relevance * 100) + '</b></div><div class="cell-sub">' + t('grp.rel_ad', { r: Math.round(x.relevance * 100), a: Math.round(x.ad_prob * 100) }) + '</div></td>' +
+              '<td class="small text-2" style="max-width:340px">' + esc(x.reason) + discoveryEvidence(x) + '</td><td>' + U.tag(t('disc.' + x.status), x.status === 'joined' ? 'tag-success' : x.status === 'approved' ? 'tag-primary' : x.status === 'rejected' ? '' : 'tag-info') + '</td></tr>').join('') + '</tbody></table></div>'
             : '<div class="card-body">' + empty({ icon: 'search', title: t('grp.disc_empty'), body: t('grp.disc_empty_sub') }) + '</div>') +
           '<div class="card-footer"><span class="grow small muted">' + t('grp.disc_hint') + '</span><button class="btn btn-secondary btn-sm" data-action="grpReject" id="g-rej" disabled>' + t('grp.reject') + '</button><button class="btn btn-primary btn-sm" data-action="grpApprove" id="g-app" disabled>' + t('grp.approve') + '</button></div></div>';
       } else {
@@ -427,6 +507,7 @@
       if (S.tabs.settings && !['basic', 'models', 'keys', 'recipients'].includes(S.tabs.settings)) S.advOpen = true;
       const [rel, u, nt, co, pw, cfgs] = await Promise.all([api('GET', '/api/relay'), api('GET', '/api/usage'), api('GET', '/api/notify'), api('GET', '/api/company'), api('GET', '/api/power'), api('GET', '/api/agents/config')]);
       S.setData = { rel, u, nt, co };
+      S.editionInfo = S.meta.edition && S.meta.edition.id === 'my_igaming' ? await api('GET', '/api/edition') : null;
       const tot = u.total, b = tot.budget, me = rel.eval || {}, n = nt.settings;
       const card = (ic, title, body, extra, foot) => '<div class="card"><div class="card-header"><h3>' + icon(ic) + title + '</h3>' + (extra || '') + '</div><div class="card-body">' + body + '</div>' + (foot ? '<div class="card-footer" style="justify-content:flex-end">' + foot + '</div>' : '') + '</div>';
       const rcp = (key, list) => '<div class="col">' + (list || []).map((r, i) => '<div class="row" style="padding:6px 10px;border:1px solid var(--color-border);border-radius:var(--radius-md)">' + icon(/^https?:|^\+|joinchat|t\.me\/\+/.test(r) ? 'users' : 'user') + '<span class="grow small mono">' + esc(r) + '</span><button class="btn btn-ghost btn-icon btn-sm" data-action="rmRecipient" data-k="' + key + '" data-i="' + i + '">' + icon('x') + '</button></div>').join('') +
@@ -436,6 +517,7 @@
         (tot.paused ? '<div class="alert alert-danger">' + icon('pause') + '<span><b>' + t('budget.paused_title') + '</b> ' + t('budget.paused_body', { period: '@period.' + tot.period }) + '</span></div>' : '') +
         /* U47：每个 AI 的模型表（含判断模型第 6 行）放在「基本」最上面；U16：搜索 Key 也在「基本」 */
         '<div id="basic-models">' + U.skeleton(3) + '</div><div id="basic-keys"></div>' +
+        (S.editionInfo ? card('target', t('edition.title'), '<p class="small text-2">' + t('edition.scope') + '</p><p class="hint" style="margin:8px 0 12px">' + t('edition.searchHint') + '</p><div class="field"><label class="label" for="edition-product">' + t('edition.product') + '</label><textarea class="textarea" id="edition-product" maxlength="2000" placeholder="' + esc(t('edition.productPlaceholder')) + '"></textarea></div><div class="row wrap" style="margin-top:10px">' + (S.editionInfo.presets || []).filter((p) => p.key === 'channel_team').map((p) => '<label class="checkbox"><input type="checkbox" data-edition-preset="' + esc(p.key) + '" checked> ' + esc(t('edition.segment.' + p.key)) + '</label>').join('') + '</div><p class="hint" style="margin-top:10px">' + t('edition.confirmHint') + '</p>', '', '<button class="btn btn-primary btn-sm" data-action="editionPresets" id="edition-confirm">' + t('edition.create') + '</button>') : '') +
         card('coins', t('set.budgetTotal'), '<div class="form-grid"><div class="field"><label class="label">' + t('set.dayBudget') + ' ($)</label><input class="input num" id="b-d" type="number" min="0" step="1" value="' + b.daily + '"><div class="progress sm" style="margin-top:6px"><span style="width:' + (b.daily > 0 ? Math.min(100, tot.spent.today.cost / b.daily * 100) : 0) + '%"></span></div><span class="hint">' + t('c.today') + ' ' + money(tot.spent.today.cost) + '</span></div>' +
           '<div class="field"><label class="label">' + t('set.monthBudget') + ' ($)</label><input class="input num" id="b-m" type="number" min="0" step="1" value="' + b.monthly + '"><div class="progress sm" style="margin-top:6px"><span style="width:' + (b.monthly > 0 ? Math.min(100, tot.spent.month.cost / b.monthly * 100) : 0) + '%"></span></div><span class="hint">' + t('c.month') + ' ' + money(tot.spent.month.cost) + '</span></div></div>' +
           '<p class="xs muted" style="margin-top:10px">' + t('set.budgetHint') + ' ' + t('budget.hint') + '</p>', b.set_by_user ? U.lockTag() : '<span class="tag tag-outline">' + t('wb3.budgetDefault') + '</span>', '<button class="btn btn-primary btn-sm" data-action="budgetSave">' + t('c.save') + '</button>') +
@@ -449,6 +531,7 @@
         (U.feat('outreach') ?         card('edit', t('ob.q.signature'), '<textarea class="textarea" id="sb-sig" style="min-height:90px" placeholder="' + esc(t('qs.sig_ph')) + '">' + esc(co.signature || '') + '</textarea><span class="hint">' + t('sb.sig_sub') + '</span>', U.lockTag(), '<button class="btn btn-primary btn-sm" data-action="sigSave">' + t('c.save') + '</button>') : '') +
         '<div class="card"><div class="card-body row" style="gap:12px"><div class="grow"><b>' + t('set.restart') + '</b><div class="xs muted">' + t('sb.restart_sub') + '</div></div><button class="btn btn-secondary" data-action="go" data-route="onboarding" data-q="redo=1">' + icon('undo') + t('set.restart') + '</button></div></div>' +
         (pw.warn || pw.auto_sleep_minutes ? '<div class="alert ' + (pw.warn ? 'alert-warning' : 'alert-info') + '">' + icon('info') + '<span>' + t('sb.sleep', { m: pw.auto_sleep_minutes }) + (pw.active ? ' ' + t('sb.sleep_active') : '') + '</span></div>' : '') +
+        card('file', t('diag.title'), '<p class="small text-2">' + t('diag.contents') + '</p><p class="xs muted" style="margin-top:8px">' + t('diag.excludes') + '</p><p class="hint" style="margin-top:8px">' + t('diag.local') + '</p>', '', '<a class="btn btn-secondary btn-sm" id="diagnostics-export" href="/api/diagnostics/export" download>' + icon('download') + t('diag.export') + '</a>') +
         '<button class="adv-toggle" data-action="toggleAdv">' + icon(S.advOpen ? 'chevronDown' : 'chevronRight') + '<b>' + t('set.advanced') + '</b><span class="xs muted">' + t('set2.advHint') + '</span></button>' +
         (S.advOpen ? '<div class="alert alert-info">' + icon('a_manager') + '<span>' + t('settings.adv_note') + '</span></div><div class="grid" id="adv"><div id="adv-usage"></div><div id="adv-sources"></div><div id="adv-risk"></div><div id="adv-notify"></div><div id="adv-data"></div><div id="adv-about"></div></div>' : '') + '</div>';
     },
@@ -461,6 +544,16 @@
       const target = { models: '#basic-models', keys: '#basic-keys', budget: '#adv-usage', sources: '#adv-sources', notify: '#adv-notify', risk: '#adv-risk' }[sub];
       if (target && U.$(target, root)) U.$(target, root).scrollIntoView({ block: 'start' });
     },
+  };
+  A.editionPresets = async () => {
+    const input = U.$('#edition-product');
+    if (!input.reportValidity()) return;
+    const product = input.value.trim();
+    const keys = U.$$('[data-edition-preset]:checked').map((x) => x.dataset.editionPreset);
+    if (!keys.length) { toast(t('edition.selectPreset'), 'error'); return; }
+    if (await U.confirmDialog({ title: t('edition.create'), body: t(product ? 'edition.confirmBody' : 'edition.confirmDefault', { product }), onOk: async () => {
+      await api('POST', '/api/edition/presets', { confirmed: true, keys, ...(product ? { product } : {}) });
+    } })) { toast(t('edition.saved')); U.go('icp'); }
   };
   A.toggleAdv = () => { S.advOpen = !S.advOpen; if (!S.advOpen) S.tabs.settings = 'basic'; U.refresh(); };
   A.budgetSave = async (el) => { await busy(el, () => api('PUT', '/api/budget', { daily: U.$('#b-d').value, monthly: U.$('#b-m').value })); toast(t('budget.saved')); U.refreshBadges(); U.refresh(); };

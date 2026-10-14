@@ -160,6 +160,8 @@ def _tick():
     from .agents import manager, scout
     jobs.append(("manager", manager.tick))
     jobs.append(("scout", scout.tick))
+    from . import source_pool
+    jobs.append(("source_pool", source_pool.tick))
 
     paused = settings.ai_paused()
     for name, fn in jobs:

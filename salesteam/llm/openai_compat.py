@@ -7,6 +7,7 @@ import urllib.request
 import openai
 
 from ..errors import UserError
+from .. import tls
 from . import providers
 from .base import AgentConfig, LLMRequest, LLMResponse
 
@@ -39,7 +40,8 @@ def _client(cfg: AgentConfig) -> openai.OpenAI:
         raise UserError("base_url_missing", agent=f"@agent.{cfg.agent}")
     if cfg.provider != "ollama" and not cfg.api_key:
         raise UserError("key_missing", agent=f"@agent.{cfg.agent}")
-    return openai.OpenAI(api_key=cfg.api_key or "ollama", base_url=base_url, max_retries=2, timeout=600)
+    return openai.OpenAI(api_key=cfg.api_key or "ollama", base_url=base_url, max_retries=2, timeout=600,
+                         http_client=openai.DefaultHttpxClient(verify=tls.context()))
 
 
 def _said(e) -> str:

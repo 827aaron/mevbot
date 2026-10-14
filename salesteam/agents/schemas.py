@@ -16,6 +16,9 @@ I = {"type": "integer"}
 ICP = obj({
     "name": S,                       # 模板名称
     "product": S,                    # 我方产品 / 服务介绍（必填）
+    "geo_mode": {"type": "string", "enum": ["registered_country", "served_market"]},
+    "target_markets": SL,
+    "b2b_segment": {"type": "string", "enum": ["", "channel_team", "igaming_company"]},
     "countries": SL,                 # 目标国家两位代码（必填）
     "customer_types": SL,            # 目标客户类型（必填）
     "industries": SL,

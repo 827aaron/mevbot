@@ -3,11 +3,12 @@
 Uses existing TG leases, account warmup/caps and assisted-join queue. No message
 monitoring is enabled here; actual reads still require a running TG lead task.
 """
+import re
 import threading
 import time
 from functools import wraps
 
-from .. import channels, db, llm, settings
+from .. import channels, db, edition, llm, settings, tasks
 from ..errors import UserError
 from ..tg import joining, pool
 from . import manager
@@ -15,7 +16,7 @@ from . import manager
 _lock = threading.RLock()
 _active_days = set()
 DEFAULT = {"enabled": False, "icp_id": None, "time_of_day": "10:00", "auto_queue": False,
-           "auto_retire": False, "min_age_days": 7, "min_sample": 10, "max_bad_ratio": 0.8}
+           "auto_retire": False, "auto_monitor": False, "min_age_days": 7, "min_sample": 10, "max_bad_ratio": 0.8}
 
 
 def protected(fn):
@@ -28,7 +29,8 @@ def protected(fn):
 
 
 def get_settings():
-    return {**DEFAULT, **(settings.get("scout_settings", {}) or {})}
+    default = {**DEFAULT, "auto_monitor": edition.current()["id"] == "my_igaming"}
+    return {**default, **(settings.get("scout_settings", {}) or {})}
 
 
 @protected
@@ -38,7 +40,7 @@ def set_settings(data):
             raise UserError("invalid_value", field="scout")
         old = get_settings()
         cfg = {**old, **{k: v for k, v in data.items() if k in DEFAULT}}
-        for k in ("enabled", "auto_queue", "auto_retire"):
+        for k in ("enabled", "auto_queue", "auto_retire", "auto_monitor"):
             manager.boolean(cfg[k], k)
         manager.parse_time(cfg["time_of_day"])
         manager.integer(cfg["min_age_days"], "min_age_days", 1, 90)
@@ -60,9 +62,13 @@ def set_settings(data):
             if needs_risk:
                 joining_cfg["assisted_join"] = True
                 settings.put("joining", joining_cfg)
-                settings.log_risk("joining.assisted_join", True, "High-score automatic queue explicitly confirmed")
-                settings.log_risk("scout.auto_queue", True, "Only score >=70; account limits and warmup apply")
+                settings.log_risk("joining.assisted_join", True, "Automatic queue explicitly confirmed")
+                settings.log_risk("scout.auto_queue", True, "Public business agent source signals in MY edition; general score>=70. Account limits and warmup apply")
             settings.put("scout_settings", cfg)
+        if old["enabled"] and old["auto_monitor"] and (not cfg["enabled"] or not cfg["auto_monitor"] or cfg["icp_id"] != old["icp_id"]):
+            for row in db.query("SELECT id FROM tasks WHERE created_by='scout' AND status='running'"):
+                tasks.cancel(row["id"])
+                settings.put("scout_collection_state", {"day": manager.day(), "task_id": row["id"], "blocked": "disabled", "toggle_cancelled": row["id"]})
         return cfg
 
 
@@ -112,7 +118,7 @@ def suggestions(cfg=None, ts=None):
 @protected
 def status():
     _recover_interrupted()
-    return {"settings": get_settings(), "blocked": blocked(),
+    return {"settings": get_settings(), "blocked": blocked(), "pool_report": pool_report(),
             "runs": [{**r, "result": db.loads(r["result"], {})} for r in
                      db.query("SELECT * FROM scout_runs ORDER BY day DESC LIMIT 30")],
             "suggestions": suggestions()}
@@ -141,7 +147,9 @@ def run_once(day, cfg=None):
             for c in suggested:
                 channels.set_status(c["id"], "retired")
                 retired.append(c["id"])
-        result = {**result, "queued": queued, "retired": retired, "suggestions": suggested}
+        result = {**result, "icp_id": cfg["icp_id"], "queued": queued, "retired": retired, "suggestions": suggested}
+        result.update(_join_report(day, cfg["icp_id"]))
+        result["collection"] = collection_state(day, cfg)
         db.execute("UPDATE scout_runs SET status='done',result=?,error='',updated_at=? WHERE day=?",
                    (db.dumps(result), db.now(), day))
         return result
@@ -176,6 +184,8 @@ def tick(ts=None):
     date = manager.day(ts)
     _recover_interrupted()
     cfg = get_settings()
+    if cfg["enabled"] and time.strftime("%H:%M", time.localtime(ts)) >= cfg["time_of_day"]:
+        ensure_collection(date, cfg)
     if blocked(cfg) or time.strftime("%H:%M", time.localtime(ts)) < cfg["time_of_day"]:
         return None
     with _lock:
@@ -190,3 +200,78 @@ def tick(ts=None):
             db.execute("UPDATE scout_runs SET status='failed',error='unexpected',updated_at=? WHERE day=?", (ts, date))
             raise
     return date
+
+
+def _join_report(date, icp_id):
+    start = time.mktime(time.strptime(date, "%Y-%m-%d"))
+    end = time.mktime(time.localtime(start + 36 * 3600)[:3] + (0, 0, 0, 0, 0, -1))
+    rows = db.query("SELECT * FROM tg_join_queue WHERE icp_id=? AND created_at>=? AND created_at<?", (icp_id, start, end))
+    monitored = 0
+    for row in rows:
+        if row["status"] != "joined":
+            continue
+        active = db.query_one("SELECT id FROM tg_chats WHERE id=? AND monitored=1 AND left_at IS NULL", (row.get("tg_chat_id"),))
+        if not row.get("tg_chat_id") and not re.search(r"/(?:\+|joinchat/)", row["link"] or ""):
+            username = (row["link"] or "").rstrip("/").split("/")[-1]
+            active = db.query_one("SELECT id FROM tg_chats WHERE LOWER(username)=LOWER(?) AND monitored=1 AND left_at IS NULL", (username,))
+        if active:
+            monitored += 1
+    return {"joined": sum(r["status"] == "joined" for r in rows), "monitored": monitored,
+            "failed": sum(r["status"] == "failed" for r in rows),
+            "join_pending": sum(r["status"] == "pending" for r in rows),
+            "join_needs_approval": sum(r["status"] == "needs_approval" for r in rows),
+            "join_errors": sum(bool(r["error"]) for r in rows)}
+
+
+def collection_state(date=None, cfg=None):
+    date, cfg = date or manager.day(), cfg or get_settings()
+    row = db.query_one("SELECT id,status,error FROM tasks WHERE created_by='scout' AND goal_date=? AND icp_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (date, cfg["icp_id"]))
+    if row:
+        return {"task_id": row["id"], "status": row["status"], "blocked": row["error"] or ""}
+    return {"task_id": None, "status": "blocked", "blocked": settings.get("scout_collection_state", {}).get("blocked", "not_started")}
+
+
+@protected
+def ensure_collection(date=None, cfg=None):
+    """Independent of lead goals and discovery success, bounded by today's end."""
+    cfg, date = cfg or get_settings(), date or manager.day()
+    if edition.current()["id"] != "my_igaming" or not cfg["enabled"] or not cfg["auto_monitor"]:
+        return None
+    try:
+        if settings.ai_paused():
+            raise UserError("ai_paused")
+        if not pool.monitor_accounts():
+            raise UserError("tg_no_active_account")
+        if llm.budget_state()["paused"]:
+            raise UserError("budget_exceeded")
+        llm.check_budget("monitor", llm.get_config("monitor"))
+        with tasks.registry_lock():
+            row = db.query_one("SELECT id,status FROM tasks WHERE created_by='scout' AND goal_date=? AND icp_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (date, cfg["icp_id"]))
+            if row:
+                state = settings.get("scout_collection_state", {}) or {}
+                paused = db.query_one("SELECT 1 FROM task_events WHERE task_id=? AND key='ev.ai_paused_all' LIMIT 1", (row["id"],))
+                resume = row["status"] == "interrupted" or (row["status"] == "cancelled" and (paused or state.get("toggle_cancelled") == row["id"]))
+                if not resume:
+                    return row["id"]
+            params = {"icp_id": cfg["icp_id"], "sources": ["tg"], "target": 1, "continuous_monitor": True}
+            if row:
+                params["resume_from"] = row["id"]
+            task = tasks.create_task(params,
+                                     created_by="scout", parent_id=row["id"] if row else "scout:" + date, goal_date=date)
+            settings.put("scout_collection_state", {"day": date, "task_id": task["id"], "blocked": ""})
+            return task["id"]
+    except UserError as exc:
+        settings.put("scout_collection_state", {"day": date, "task_id": None, "blocked": exc.key})
+        return None
+
+
+def pool_report(date=None):
+    cfg = get_settings()
+    row = db.query_one("SELECT * FROM scout_runs WHERE day=?", (date,)) if date else db.query_one("SELECT * FROM scout_runs ORDER BY day DESC LIMIT 1")
+    date = date or (row["day"] if row else manager.day())
+    result = db.loads(row["result"], {}) if row else {}
+    cfg = {**cfg, "icp_id": result.get("icp_id", cfg["icp_id"])}
+    return {"day": date, "discovered": result.get("discovered", result.get("added", 0)),
+            "deduplicated": result.get("deduplicated", 0), "queued": result.get("queued", 0),
+            **_join_report(date, cfg["icp_id"]), "collection": collection_state(date, cfg),
+            "discovery_status": row["status"] if row else "blocked", "blocked": row["error"] if row else blocked(cfg)}

@@ -4,10 +4,13 @@
 # 测试安装包：无需激活。浏览器组件（Chromium）首次打开时下载。
 import sys
 from pathlib import Path
+from salesteam import edition
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parent
+EDITION = edition.current()
+DISPLAY_NAME = EDITION["name"]["zh"]
 VERSION = "0.2.0"
 for line in (ROOT / "salesteam" / "__init__.py").read_text(encoding="utf-8").splitlines():
     if line.startswith("VERSION"):
@@ -17,12 +20,13 @@ datas = [
     (str(ROOT / "web"), "web"),                                            # 界面（含 i18n）
     (str(ROOT / "salesteam" / "prompts" / "default"), "salesteam/prompts/default"),   # 默认提示词
     (str(ROOT / "salesteam" / "llm" / "presets.json"), "salesteam/llm"),
+    (str(ROOT / "salesteam" / "edition.json"), "salesteam"),
 ]
 binaries = []
 hiddenimports = collect_submodules("salesteam") + collect_submodules("uvicorn") + ["multipart", "python_multipart"]
 
 # 带数据文件 / 驱动 / 原生库的第三方包：整体收集
-for pkg in ("playwright", "patchright", "scrapling", "browserforge", "apify_fingerprint_datapoints", "onnxruntime",
+for pkg in ("certifi", "truststore", "playwright", "patchright", "scrapling", "browserforge", "apify_fingerprint_datapoints", "onnxruntime",
             "tokenizers", "curl_cffi", "webview", "telethon", "openpyxl", "pypdf", "tld", "markdownify", "lxml"):
     try:
         d, b, h = collect_all(pkg)
@@ -63,7 +67,7 @@ exe = EXE(
     icon=icon,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,            # 当前 Python 的架构（这台 Mac：arm64；Intel 版在 GitHub Actions macos-15-intel 上构建）
+    target_arch="arm64" if sys.platform == "darwin" else None,
     codesign_identity=None,
     entitlements_file=None,
     upx=False,
@@ -76,11 +80,11 @@ if sys.platform == "darwin":
         coll,
         name="JamesAgent.app",           # 打包后改名为 詹姆斯智能体.app（见 build_mac.sh）
         icon=icon,
-        bundle_identifier="com.jamesagent.desktop",
+        bundle_identifier="com.jamesagent.desktop.myigaming" if EDITION["id"] == "my_igaming" else "com.jamesagent.desktop",
         version=VERSION,
         info_plist={
             "CFBundleName": "JamesAgent",
-            "CFBundleDisplayName": "詹姆斯智能体",
+            "CFBundleDisplayName": DISPLAY_NAME,
             "CFBundleShortVersionString": VERSION,
             "CFBundleVersion": VERSION,
             "LSMinimumSystemVersion": "14.0",

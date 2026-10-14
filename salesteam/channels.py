@@ -16,7 +16,7 @@ from functools import wraps
 from . import db
 from .errors import UserError
 
-KINDS = ["tg_group", "tg_channel", "fb_group", "forum", "b2b_board", "tender_site", "directory", "expo_list",
+KINDS = ["tg_group", "tg_channel", "fb_group", "instagram_account", "x_account", "reddit_community", "forum", "b2b_board", "tender_site", "directory", "expo_list",
          "youtube_channel", "news_source"]
 STATUSES = ["candidate", "monitored", "retired"]
 

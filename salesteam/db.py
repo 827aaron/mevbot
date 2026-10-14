@@ -269,6 +269,7 @@ CREATE TABLE IF NOT EXISTS tg_join_queue (
     source TEXT NOT NULL DEFAULT 'manual',   -- manual（B 粘贴链接）/ discovery（C AI 找群）
     discovery_id INTEGER,
     icp_id INTEGER,
+    tg_chat_id INTEGER,
     attempts INTEGER NOT NULL DEFAULT 0,
     next_at REAL NOT NULL DEFAULT 0,
     error TEXT NOT NULL DEFAULT '',
@@ -522,6 +523,7 @@ def connect():
 
 # 旧数据库升级：只增加列，不删数据
 MIGRATIONS = [
+    ("tg_join_queue", "tg_chat_id", "INTEGER"),
     ("leads", "reviewed_at", "REAL"),
     ("leads", "review_later_until", "REAL"),
     ("leads", "review_plan", "TEXT NOT NULL DEFAULT ''"),

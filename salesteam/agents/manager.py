@@ -158,6 +158,13 @@ def _report(p, ts):
             "sources": p["goal"]["sources"], "icp_id": p["goal"]["icp_id"], "counts": counts,
             "tasks": p["tasks"], "last_error": p["last_error"], "updated_at": ts,
             "notification_sent": False}
+    from . import scout
+    data["tg_source_pool"] = scout.pool_report(p["day"])
+    try:
+        from .. import source_pool
+        data["source_pool"] = source_pool.summary()
+    except ImportError:
+        pass
     db.execute("INSERT INTO manager_reports(day,data,updated_at) VALUES(?,?,?) ON CONFLICT(day) DO UPDATE "
                "SET data=excluded.data,updated_at=excluded.updated_at", (p["day"], db.dumps(data), ts))
     return data

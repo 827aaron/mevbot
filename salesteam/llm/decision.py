@@ -253,7 +253,8 @@ def _openrouter(content: str, options: dict, instructions: str, model: str, key:
     req = urllib.request.Request(OPENROUTER_URL, data=json.dumps(body).encode(), method="POST",
                                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        from .. import tls
+        with urllib.request.urlopen(req, timeout=60, context=tls.context()) as r:
             data = json.load(r)
     except urllib.error.HTTPError as e:
         detail = ""
