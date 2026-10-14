@@ -464,6 +464,11 @@ def memos(agent: str | None = None, status: str | None = None):
     return memory.list_memos(agent, status)
 
 
+@router.delete("/memory/{agent}")
+def memory_clear(agent: str):
+    return chat_mod.reset_memory(agent)
+
+
 @router.post("/memos")
 def memo_add(data: dict = Depends(body)):
     d = data

@@ -84,7 +84,16 @@ def memos_block(agent: str) -> str:
 
 def work_summary(agent: str) -> str:
     day0 = time.time() - 7 * 86400
-    lines = []
+    # Capability facts are available before the first task. They must not be
+    # confused with the user's actual configuration or collected results.
+    lines = ["Software capabilities (available workflows, not completed actions): web search and crawling; "
+             "manual source URLs and feature words; scheduled source-pool/scout discovery; "
+             "Telegram joining queue and incremental monitoring; Facebook, Instagram, YouTube, X and Reddit "
+             "source entries with separate owner-operated browser logins; per-post/comment evidence and "
+             "unchanged-content skipping; local diagnostic ZIP export. Configure accounts/API/ICP and "
+             "enable the relevant schedule first. Pages: run=immediate tasks/Manager daily goals, "
+             "channels=source pool/scout/TG queue, accounts=platform logins, settings=API/diagnostics. "
+             "A listed feature is not proof that this user's account can access a particular source."]
     if agent in ("researcher", "manager"):
         for t in db.query("SELECT id, status, result, target, stats, created_at FROM tasks WHERE kind='research' "
                           "AND created_at>? ORDER BY created_at DESC LIMIT 5", (day0,)):

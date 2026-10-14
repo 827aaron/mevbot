@@ -1900,5 +1900,13 @@
  "company.modelsDone": "模型方案已应用；各 AI 的配置状态可在「设置 → AI 模型」查看。",
  "company.modelsPending": "模型方案尚未应用；请在「设置 → AI 模型」检查并配置需要的 AI。",
  "company.nextStep": "准备好后，在左边「任务管理」里开始找客户；有问题随时问主管。",
- "company.openManager": "打开主管对话"
+ "company.openManager": "打开主管对话",
+ "chat.forget": "清除记忆",
+ "chat.forgetAgent": "清除{name}的记忆",
+ "chat.forgetAll": "清除全部对话与备忘录",
+ "chat.clearBody": "清空与{name}的全部聊天记录？已保存的备忘录会保留。正在生成的旧回复不会重新加入对话。此操作不可撤销。",
+ "chat.forgetBody": "清空与{name}的聊天记录，并删除属于它的全部备忘录？共享给所有 AI 的备忘录会保留，可在记忆中心统一清除。画像、线索、来源池、学习样本和账号配置会保留。此操作不可撤销；正在生成的旧回复不会重新加入对话。",
+ "chat.forgetAllBody": "清空所有 AI 的聊天记录及全部备忘录（包括共享备忘录）？画像、线索、来源池、学习样本、提示词修改和账号配置会保留。此操作不可撤销；正在生成的旧对话回复会被丢弃，运行中的采集任务不会停止。",
+ "chat.cleared": "已清除",
+ "errors.chat_cleared": "对话已清除，旧回复已丢弃。请重新发送。"
 }

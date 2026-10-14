@@ -207,7 +207,7 @@
  "ch.sub": "Every place we find customers: Telegram groups/channels — later also FB groups, forums, B2B buying boards, tender sites, directories, expo lists, YouTube channels and news sources. See how many leads each one brings.",
  "ch.tgJoined": "Telegram groups",
  "ch.where": "Country / language",
- "chat.clear": "Clear chat",
+ "chat.clear": "Clear conversation",
  "chat.disabled": "This AI is off — turn it on in Settings to chat",
  "chat.drawer_btn": "Manager",
  "chat.drawer_tip": "Talk to the Sales Manager",
@@ -1900,5 +1900,13 @@
  "company.modelsDone": "A model plan has been applied. Check each AI in Settings → AI models.",
  "company.modelsPending": "A model plan has not been applied. Check and configure the required AIs in Settings → AI models.",
  "company.nextStep": "When ready, start prospecting from Tasks in the sidebar. Ask the Manager if you need help.",
- "company.openManager": "Open Manager chat"
+ "company.openManager": "Open Manager chat",
+ "chat.forget": "Clear memory",
+ "chat.forgetAgent": "Clear {name}'s memory",
+ "chat.forgetAll": "Clear all conversations and memos",
+ "chat.clearBody": "Clear all chat history with {name}? Saved memos will remain. Replies already being generated will not return to the conversation. This cannot be undone.",
+ "chat.forgetBody": "Clear chat history and all memos owned by {name}? Shared memos for all AIs will remain; clear them together in the memory center. Profiles, leads, source pools, learning samples and account settings will remain. This cannot be undone; old replies already being generated will be discarded.",
+ "chat.forgetAllBody": "Clear every AI conversation and all memos, including shared memos? Profiles, leads, source pools, learning samples, prompt edits and account settings will remain. This cannot be undone; old chat replies already being generated will be discarded. Running collection tasks will continue.",
+ "chat.cleared": "Cleared",
+ "errors.chat_cleared": "The conversation was cleared and the old reply discarded. Please send again."
 }

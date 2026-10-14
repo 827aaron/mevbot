@@ -47,9 +47,10 @@ def main():
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         base = f"http://127.0.0.1:{port}"
 
-        def request(path, data):
-            req = urllib.request.Request(base + path, data=json.dumps(data).encode("utf-8"),
-                                         headers={"Content-Type": "application/json"})
+        def request(path, data=None, method=None):
+            req = urllib.request.Request(base + path,
+                                         data=json.dumps(data).encode("utf-8") if data is not None else None,
+                                         headers={"Content-Type": "application/json"}, method=method)
             with opener.open(req, timeout=45) as response:
                 return json.load(response)
 
@@ -98,6 +99,41 @@ def main():
                     if manifest.get("version") != expected:
                         raise RuntimeError("wrong packaged diagnostic version")
             checks.append("/api/diagnostics/export")
+            # Exercise the bundled deletion handlers with disposable local data
+            # and mock completions; never use a customer's model or credentials.
+            for asset, markers in {
+                "/static/js/mgr-chat.js": ("mgrClear", "mgrForget", "clearDialog"),
+                "/static/js/pages-team.js": ("chat.forgetAll",),
+            }.items():
+                with opener.open(base + asset, timeout=5) as response:
+                    content = response.read().decode("utf-8")
+                if any(marker not in content for marker in markers):
+                    raise RuntimeError(f"missing bundled deletion control: {asset}")
+                checks.append(asset)
+            prompt_state = request("/api/prompts")
+            bundled_prompt = next(p for p in prompt_state["items"] if p["name"] == "chat.system")
+            if prompt_state["version"] != "2026.10-p4" or "First working principle" not in bundled_prompt["default"]:
+                raise RuntimeError("wrong bundled chat prompt revision")
+            for agent in ("manager", "analyst"):
+                request(f"/api/agents/{agent}/config", {"provider": "mock", "model": "mock"}, method="PUT")
+                request(f"/api/agents/{agent}/enabled", {"on": True}, method="PUT")
+                request(f"/api/chat/{agent}", {"message": f"packaged QA {agent}"})
+            for agent in ("manager", "analyst", "all"):
+                request("/api/memos", {"agent": agent, "text": f"packaged QA memo {agent}"})
+            request("/api/chat/manager", method="DELETE")
+            if request("/api/chat/manager")["messages"] or len(request("/api/memos")) != 3:
+                raise RuntimeError("bundled history clear failed or removed saved memos")
+            request("/api/memory/manager", method="DELETE")
+            if {m["agent"] for m in request("/api/memos")} != {"analyst", "all"}:
+                raise RuntimeError("bundled agent-memory reset has incorrect scope")
+            if not request("/api/chat/analyst")["messages"]:
+                raise RuntimeError("bundled agent-memory reset deleted another conversation")
+            request("/api/memory/all", method="DELETE")
+            if request("/api/memos") or request("/api/chat/analyst")["messages"]:
+                raise RuntimeError("bundled all-agent memory reset failed")
+            chat_checks = {"clear_history": True, "reset_agent_memory": True,
+                           "reset_all_memory": True, "prompt_version": prompt_state["version"],
+                           "completions": "local mock only"}
             models = request("/api/relay/models", {"protocol": "openai", "base_url": fixture.base_url,
                                                   "api_key": "tls-test-key"})
             if fixture.model not in models.get("models", []):
@@ -127,7 +163,7 @@ def main():
                 tls_checks["nano_gpt_public_tls"] = "verified; authentication required"
             installers = list(Path("dist").glob("*.dmg")) + list(Path("dist").glob("JamesAgent-Setup-*.exe"))
             result = {"version": expected, "edition": embedded, "commit": os.environ.get("GITHUB_SHA", ""), "checks": checks,
-                      "tls": tls_checks, "sha256": {p.name: digest(p) for p in installers}}
+                      "tls": tls_checks, "chat": chat_checks, "sha256": {p.name: digest(p) for p in installers}}
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, indent=2), encoding="utf-8")
             print(json.dumps(result))

@@ -11,12 +11,28 @@
   动作只能是白名单里的类型；撤销类动作只由程序生成（不让模型生成），模型只能建议“去某页面”。
 - post()：程序把事件写进对话（例如客户在审核台点「这条不好」→ 主管回复“已调整… [撤销]”），抽屉里能看到
 """
+import threading
+from functools import wraps
+
 from .. import db, i18n, llm, prompts, settings
 from ..errors import UserError
 from . import memory, schemas
 from .registry import AGENT_KEYS, active_keys, is_active
 
 HISTORY_TURNS = 6
+# Serialize context mutations, never the network request. A cleared conversation
+# must not be recreated by a response that was already in flight.
+_context_lock = threading.RLock()
+_generations = {agent: 0 for agent in AGENT_KEYS}
+
+
+def _locked(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _context_lock:
+            return fn(*args, **kwargs)
+    return wrapped
+
 # 模型可建议的页面（goto 动作）；其余动作类型只由程序生成
 ROUTES = ["leads", "channels", "run", "learning", "accounts", "icp", "settings", "onboarding"]   # v1 没有审核台
 ACTION_TYPES = {"goto", "undo_review", "confirm_memo", "reject_memo", "open_lead"}
@@ -87,6 +103,7 @@ def unread(agent: str | None = None) -> dict:
     return out
 
 
+@_locked
 def mark_seen(agent: str):
     last = db.query_one("SELECT COALESCE(MAX(id),0) m FROM agent_chats WHERE agent=?", (agent,))["m"]
     seen = settings.get("chat_seen", {}) or {}
@@ -111,6 +128,7 @@ def _check_actions(actions):
     return out
 
 
+@_locked
 def post(agent: str, text: str, actions=None, user_text: str = "", key: str = "", params=None) -> dict:
     """程序把一件事写进与某个 AI 的对话（不调用模型）。user_text 非空时先记一条客户的话。
     key/params 让前端可按当前界面语言重新渲染。"""
@@ -156,31 +174,37 @@ def send(agent: str, message: str, page=None) -> dict:
         raise UserError("agent_disabled", agent=f"@agent.{agent}")
     if not llm.configured(agent):
         raise UserError("agent_not_configured", agent=f"@agent.{agent}")
-    lang = settings.get("ui_lang")
-    prev = history(agent, HISTORY_TURNS * 2)
-    convo = "\n".join(f"{'Customer' if r['role'] == 'user' else 'You'}: {r['content']}" for r in prev)
-    system = prompts.render("chat.system", role=memory.role(agent),
-                            lang="Simplified Chinese" if lang == "zh" else "English", routes=", ".join(ROUTES),
-                            work=memory.work_summary(agent), memos=memory.memos_block(agent), page=_page_text(page))
-    user = (f"Earlier conversation:\n{convo}\n\n" if convo else "") + f"Customer: {message}"
-    umsg = _insert(agent, "user", message, {"page": page} if page else {})
+    with _context_lock:
+        generation = _generations[agent]
+        lang = settings.get("ui_lang")
+        prev = history(agent, HISTORY_TURNS * 2)
+        convo = "\n".join(f"{'Customer' if r['role'] == 'user' else 'You'}: {r['content']}" for r in prev)
+        system = prompts.render("chat.system", role=memory.role(agent),
+                                lang="Simplified Chinese" if lang == "zh" else "English", routes=", ".join(ROUTES),
+                                work=memory.work_summary(agent), memos=memory.memos_block(agent), page=_page_text(page))
+        user = (f"Earlier conversation:\n{convo}\n\n" if convo else "") + f"Customer: {message}"
+        umsg = _insert(agent, "user", message, {"page": page} if page else {})
     data, _ = llm.call_json(agent, "agent_chat", system, user, SCHEMA, effort="low",
                             context={"message": message, "agent": agent, "lang": lang, "page": page})
-    reply = (data.get("reply") or "").strip() or "…"
-    memo_ids = [memory.add_memo(agent, m, origin="chat", source_ref=f"chat:{umsg['id']}")
-                for m in data.get("memos") or [] if str(m).strip()]
-    memos = [db.query_one("SELECT * FROM memos WHERE id=?", (i,)) for i in memo_ids]
-    actions = []
-    for m in memos:
-        if m:
-            actions += [{"type": "confirm_memo", "memo_id": m["id"], "text": m["text"]},
-                        {"type": "reject_memo", "memo_id": m["id"]}]
-    if data.get("goto") in ROUTES:
-        actions.append({"type": "goto", "route": data["goto"]})
-    msg = _insert(agent, "assistant", reply, {"memo_ids": memo_ids, "actions": actions})
-    return {"reply": reply, "memos": memos, "message": shape(msg), "user_message": shape(umsg)}
+    with _context_lock:
+        if generation != _generations[agent]:
+            raise UserError("chat_cleared", 409)
+        reply = (data.get("reply") or "").strip() or "…"
+        memo_ids = [memory.add_memo(agent, m, origin="chat", source_ref=f"chat:{umsg['id']}")
+                    for m in data.get("memos") or [] if str(m).strip()]
+        memos = [db.query_one("SELECT * FROM memos WHERE id=?", (i,)) for i in memo_ids]
+        actions = []
+        for m in memos:
+            if m:
+                actions += [{"type": "confirm_memo", "memo_id": m["id"], "text": m["text"]},
+                            {"type": "reject_memo", "memo_id": m["id"]}]
+        if data.get("goto") in ROUTES:
+            actions.append({"type": "goto", "route": data["goto"]})
+        msg = _insert(agent, "assistant", reply, {"memo_ids": memo_ids, "actions": actions})
+        return {"reply": reply, "memos": memos, "message": shape(msg), "user_message": shape(umsg)}
 
 
+@_locked
 def do_action(msg_id: int, index: int) -> dict:
     """执行对话里某条回复的第 index 个行内动作（只认白名单类型）。返回更新后的消息 + 结果。"""
     r = db.query_one("SELECT * FROM agent_chats WHERE id=?", (msg_id,))
@@ -229,5 +253,38 @@ def mark_lead_undone(lead_id: int):
             db.execute("UPDATE agent_chats SET meta=? WHERE id=?", (db.dumps(meta), r["id"]))
 
 
+def _clear_history(agents):
+    seen = settings.get("chat_seen", {}) or {}
+    for agent in agents:
+        db.execute("DELETE FROM agent_chats WHERE agent=?", (agent,))
+        seen.pop(agent, None)
+    settings.put("chat_seen", seen)
+
+
+@_locked
 def clear(agent: str):
-    db.execute("DELETE FROM agent_chats WHERE agent=?", (agent,))
+    if agent not in AGENT_KEYS:
+        raise UserError("unknown_agent", 404, agent=agent)
+    with db.transaction():
+        _clear_history([agent])
+    _generations[agent] += 1
+
+
+@_locked
+def reset_memory(agent: str):
+    """Forget conversation and standing memos only; retain business records.
+
+    Shared memos belong to all agents and require an explicit all-agent reset.
+    """
+    if agent != "all" and agent not in AGENT_KEYS:
+        raise UserError("unknown_agent", 404, agent=agent)
+    agents = list(AGENT_KEYS) if agent == "all" else [agent]
+    with db.transaction():
+        _clear_history(agents)
+        if agent == "all":
+            db.execute("DELETE FROM memos")
+        else:
+            db.execute("DELETE FROM memos WHERE agent=?", (agent,))
+    for key in agents:
+        _generations[key] += 1
+    return {"ok": True, "agents": agents, "shared_memos_retained": agent != "all"}

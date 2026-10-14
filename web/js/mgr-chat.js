@@ -13,7 +13,7 @@
   S.chats = {};               // agent -> {msgs, last, loaded, sending}
   S.chatTarget = 'manager';
 
-  function box(key) { return (S.chats[key] = S.chats[key] || { msgs: [], last: 0, loaded: false, sending: false }); }
+  function box(key) { return (S.chats[key] = S.chats[key] || { msgs: [], last: 0, loaded: false, sending: false, clearing: false, epoch: 0 }); }
   function merge(key, list) {
     const b = box(key);
     (list || []).forEach((m) => {
@@ -26,15 +26,19 @@
   }
   async function load(key, force) {
     const b = box(key);
-    if (b.loaded && !force) return;
+    if (b.clearing || (b.loaded && !force)) return;
+    const epoch = b.epoch;
     const r = await U.api('GET', '/api/chat/' + key);
+    if (epoch !== b.epoch) return;
     b.msgs = []; b.last = 0; merge(key, r.messages); b.loaded = true;
   }
   async function poll() {
     const key = S.chatTarget || 'manager', b = box(key);
-    if (!document.querySelector('[data-mgr-chat]') || b.sending || !b.loaded) return;
+    if (!document.querySelector('[data-mgr-chat]') || b.sending || b.clearing || !b.loaded) return;
+    const epoch = b.epoch;
     try {
       const r = await U.api('GET', '/api/chat/' + key + '?after=' + b.last);
+      if (epoch !== b.epoch) return;
       if (r.messages.length) { merge(key, r.messages); renderChats(); seen(key); }
     } catch (e) { /* 网络抖动：下次再取 */ }
   }
@@ -73,6 +77,7 @@
     if (!list.length && b.loaded) list = [{ from: 'agent', id: 0, text: solo ? t('mc.agentIntro', { name: t('agent.' + tg) }) : t('mc2.intro'), time: Date.now() / 1000 }];
     if (b.sending) list.push({ thinking: true });
     return (solo ? '<div class="solo-bar" data-agent="' + tg + '">' + U.avatar(tg, 'sm') + '<b class="small">' + esc(t('mc.talkingTo', { name: t('agent.' + tg) })) + '</b><span class="grow"></span><button class="btn btn-ghost btn-sm" data-action="mgrTarget" data-k="manager">' + icon('chevronLeft') + t('mc.back') + '</button></div>' : '') +
+      '<div class="row wrap" style="padding:6px 12px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" data-action="mgrClear" data-k="' + tg + '"' + (b.clearing ? ' disabled' : '') + '>' + icon('trash') + t('chat.clear') + '</button><button class="btn btn-ghost btn-sm" data-action="mgrForget" data-k="' + tg + '"' + (b.clearing ? ' disabled' : '') + '>' + icon('brain') + t('chat.forget') + '</button></div>' +
       '<div class="chat-scroll mgr-scroll">' + (b.loaded ? list.map((m) => msgHtml(m, tg)).join('') : '<div class="row small muted" style="padding:20px"><span class="spinner"></span>' + t('c.loading') + '</div>') + '</div>' +
       '<div class="suggestions"><span class="xs muted" style="align-self:center">' + t('mc.mention') + '</span>' + AGENT_KEYS.filter((k) => k !== 'manager').map((k) => '<span class="chip chip-sm' + (tg === k ? ' active' : '') + '" data-action="mgrTarget" data-k="' + k + '" data-agent="' + k + '">' + U.avatar(k, 'sm') + esc(t('agent.' + k)) + '</span>').join('') +
       (solo ? '' : '<span class="sugg-sep"></span>' + SUGGEST.map((k) => '<span class="chip chip-sm sugg-phrase" data-action="mgrSuggest" data-k="' + k + '">' + esc(t(k)) + '</span>').join('')) + '</div>' +
@@ -139,14 +144,53 @@
     const mention = parseMention(q);
     if (mention) { S.chatTarget = mention.key; q = mention.rest; await ensure(); if (!q) { S.mgrDraft = ''; renderChats(); focusInput(); return; } }
     const key = S.chatTarget || 'manager', b = box(key);
-    if (b.sending) return;
+    if (b.sending || b.clearing) return;
+    const epoch = b.epoch;
     S.mgrDraft = '';
     b.msgs.push({ id: 0, from: 'me', text: q, time: Date.now() / 1000, pending: true }); b.sending = true; renderChats();
     try {
       const r = await U.api('POST', '/api/chat/' + key, { message: q, page: pageCtx() });
+      if (epoch !== b.epoch) return;
       b.msgs = b.msgs.filter((x) => !x.pending); merge(key, [r.user_message, r.message]);
-    } catch (e) { b.msgs = b.msgs.filter((x) => !x.pending); S.mgrDraft = q; U.toastErr(e); }
+    } catch (e) { if (epoch !== b.epoch) return; b.msgs = b.msgs.filter((x) => !x.pending); S.mgrDraft = q; U.toastErr(e); }
     b.sending = false; renderChats(); seen(key); U.refreshBadges();
+  }
+
+  async function clearDialog(key, forget) {
+    const all = key === 'all';
+    const keys = all ? [...new Set(U.agentKeys().concat(Object.keys(S.chats)))] : [key];
+    if (keys.some((k) => box(k).clearing)) return false;
+    const accepted = await U.confirmDialog({
+      title: t(all ? 'chat.forgetAll' : forget ? 'chat.forget' : 'chat.clear'),
+      body: t(all ? 'chat.forgetAllBody' : forget ? 'chat.forgetBody' : 'chat.clearBody', { name: t('agent.' + key) }),
+      ok: t('c.delete'), danger: true,
+      onOk: async () => {
+        keys.forEach((k) => { const b = box(k); b.clearing = true; b.epoch++; });
+        renderChats();
+        let cleared = false;
+        try {
+          await U.api('DELETE', (forget ? '/api/memory/' : '/api/chat/') + key);
+          keys.forEach((k) => { const b = box(k); b.msgs = []; b.last = 0; b.loaded = true; });
+          if (keys.includes(S.chatTarget || 'manager')) S.mgrDraft = '';
+          if (keys.includes('manager')) {
+            S.badges.chat = 0;
+            A.closeManagerDock();
+          }
+          cleared = true;
+        } finally {
+          keys.forEach((k) => { const b = box(k); b.clearing = false; b.sending = false; });
+          // Recover persisted history if deletion failed; never resurrect an
+          // obsolete pending request in the client.
+          if (!cleared) await Promise.all(keys.map((k) => load(k, true).catch(() => { box(k).loaded = false; })));
+          renderChats(); U.refreshBadges(); U.renderTop();
+        }
+      },
+    });
+    if (accepted) {
+      U.toast(t('chat.cleared'));
+      if (S.route === 'learning') U.refresh();
+    }
+    return accepted;
   }
 
   /* Feedback stays visible without forcing the manager panel over the user's work. */
@@ -180,12 +224,16 @@
 
   /* ---------- 行内动作（每个 act 一个处理函数） ---------- */
   A.mgrSend = (el) => { const w = el.closest('[data-mgr-chat]'); send(w.querySelector('.mgr-input').value); };
+  A.mgrClear = (el) => clearDialog(el.dataset.k, false);
+  A.mgrForget = (el) => clearDialog(el.dataset.k, true);
   A.mgrSuggest = (el) => send(t(el.dataset.k));
   A.mgrTarget = async (el) => { S.chatTarget = el.dataset.k; S.mgrDraft = ''; renderChats(); await ensure(); renderChats(); setTimeout(focusInput, 20); };
   A.chatAct = async (el) => {
+    const key = S.chatTarget || 'manager', b = box(key), epoch = b.epoch;
+    if (b.clearing) return;
     const [mid, idx] = String(el.dataset.id).split(':').map(Number);
     const r = await U.busy(el, () => U.api('POST', '/api/chat/action/' + mid + '/' + idx));
-    const key = S.chatTarget || 'manager';
+    if (epoch !== b.epoch) return;
     merge(key, [r.message]);
     const res = r.result || {};
     if (res.goto) { U.go(res.goto, res.lead_id ? { lead: res.lead_id } : null); return; }
@@ -206,5 +254,5 @@
   });
   setInterval(poll, 4000);
 
-  window.MGR = { chatBlock, chatInner, bind, renderChats, renderPanel, send, ensure, managerUpdated, load };
+  window.MGR = { chatBlock, chatInner, bind, renderChats, renderPanel, send, ensure, managerUpdated, load, clearDialog };
 })();

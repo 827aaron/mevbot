@@ -57,7 +57,8 @@
     const agent = params.agent || 'manager';
     const [list, layers] = await Promise.all([api('GET', '/api/memos'), api('GET', '/api/memory/' + agent)]);
     const rows = list.slice().sort((x, y) => (y.status === 'pending') - (x.status === 'pending'));
-    return '<div class="grid grid-main-side"><div style="min-width:0"><div class="card">' + (rows.length ? rows.map(memoRow).join('') : empty({ icon: 'edit', title: t('mem.empty'), body: t('mem2.emptySub') })) +
+    return '<div class="row wrap" style="margin-bottom:12px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" data-action="mgrForget" data-k="' + esc(agent) + '">' + icon('brain') + t('chat.forgetAgent', { name: t('agent.' + agent) }) + '</button><button class="btn btn-ghost btn-sm" data-action="mgrForget" data-k="all">' + icon('trash') + t('chat.forgetAll') + '</button></div>' +
+      '<div class="grid grid-main-side"><div style="min-width:0"><div class="card">' + (rows.length ? rows.map(memoRow).join('') : empty({ icon: 'edit', title: t('mem.empty'), body: t('mem2.emptySub') })) +
       '<div class="card-footer"><select class="select input-sm" id="m-agent" style="width:150px"><option value="all">' + t('mem2.allAgents') + '</option>' + AG().map((k) => '<option value="' + k + '">' + esc(t('agent.' + k)) + '</option>').join('') + '</select>' +
       '<input class="input input-sm grow" id="m-new" placeholder="' + esc(t('memo.add_ph')) + '"><button class="btn btn-secondary btn-sm" data-action="memoAdd">' + icon('plus') + t('memo.add') + '</button></div></div>' +
       '<p class="xs muted" style="margin-top:10px">' + icon('shield') + ' ' + t('mem2.layersSub') + '</p></div>' +

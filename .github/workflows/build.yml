@@ -33,7 +33,7 @@ jobs:
         run: .venv-build/bin/python packaging/smoke_package.py "dist/JamesAgent 马来西亚 iGaming 代理版.app/Contents/MacOS/JamesAgent"
       - uses: actions/upload-artifact@v7
         with:
-          name: JamesAgent-MY-iGaming-0.3.1-Mac-Apple-dmg
+          name: JamesAgent-MY-iGaming-0.3.2-Mac-Apple-dmg
           path: |
             dist/*.dmg
             dist/packaged-smoke.json

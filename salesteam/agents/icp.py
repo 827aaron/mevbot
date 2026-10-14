@@ -35,7 +35,7 @@ def scope_vars() -> dict:
     """提示词里的范围说明（v1 只做马来西亚、中 / 英 / 马来语，PRD §1）。"""
     word_langs = ", ".join(f"{countries.lang_name(x)} ({x})" for x in countries.LEAD_LANGS)   # 线索词的语言：中 / 英 / 马来
     if edition.current()["id"] == "my_igaming":
-        return {"scope": edition.market_instructions({"geo_mode": "served_market", "target_markets": ["MY"], "b2b_segment": ""}),
+        return {"scope": edition.market_instructions({"geo_mode": "served_market", "target_markets": ["MY"], "b2b_segment": "channel_team"}),
                 "langs": "zh, ms", "word_langs": word_langs}
     if countries.V1_SCOPE:
         return {"scope": prompts.get("scope.v1"), "langs": ", ".join(x for x in countries.LEAD_LANGS if x != "en"),

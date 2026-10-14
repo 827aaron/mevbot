@@ -9,7 +9,7 @@
 - api/       : HTTP 接口（FastAPI，只监听 127.0.0.1）
 """
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 # Runtime selection also works with an embedded edition.json in frozen builds.
 from . import edition
